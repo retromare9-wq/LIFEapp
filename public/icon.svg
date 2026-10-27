@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d5bff"/><stop offset=".55" stop-color="#8a3dff"/><stop offset="1" stop-color="#ff2f55"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#000"/>
+  <g stroke="#2b2bd6" stroke-width="4" opacity=".9">
+    <line x1="96" y1="40" x2="96" y2="300"/><line x1="176" y1="40" x2="176" y2="300"/><line x1="256" y1="40" x2="256" y2="300"/>
+    <line x1="336" y1="40" x2="336" y2="300"/><line x1="416" y1="40" x2="416" y2="300"/>
+    <line x1="40" y1="120" x2="472" y2="120"/><line x1="40" y1="210" x2="472" y2="210"/>
+  </g>
+  <g stroke="url(#g)" stroke-width="5">
+    <line x1="0" y1="300" x2="512" y2="300"/><line x1="0" y1="330" x2="512" y2="330"/><line x1="0" y1="372" x2="512" y2="372"/>
+    <line x1="0" y1="430" x2="512" y2="430"/><line x1="0" y1="505" x2="512" y2="505"/>
+    <line x1="256" y1="300" x2="256" y2="512"/><line x1="176" y1="300" x2="80" y2="512"/><line x1="336" y1="300" x2="432" y2="512"/>
+    <line x1="96" y1="300" x2="-96" y2="512"/><line x1="416" y1="300" x2="608" y2="512"/>
+  </g>
+  <text x="256" y="250" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="150" fill="#eef0ff" letter-spacing="6">LIFE</text>
+</svg>
