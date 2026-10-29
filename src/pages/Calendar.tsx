@@ -5,7 +5,7 @@ import { db, type Activity, type Todo } from '../db'
 import { WEEKDAYS, addMonths, fmtDuration, fmtLong, fmtMonthYear, fmtWeekday, monthDayKeys, monthGrid, shiftKey, todayKey } from '../lib/date'
 import { activeSubstances, logKey } from '../lib/stats'
 import { useDaySheetConfig } from '../lib/settings'
-import { coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
+import { KIND_MARK, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
 import { Sheet, TopBar, useSwipe } from '../components/ui'
 import { IconCalendar, IconChevronLeft, IconChevronRight, IconPlus, SubstanceGlyph } from '../components/Icons'
 import { moodLabel } from '../forms/JournalForms'
@@ -42,7 +42,7 @@ export function CalendarMonth() {
 
   const data = useLiveQuery(async () => {
     const [todos, substances, logs] = await Promise.all([
-      todosInRange(first, last).then((list) => list.filter((t) => t.kind !== 'todo')),
+      todosInRange(first, last),
       db.substances.orderBy('order').toArray(),
       db.abstinenceLogs.where('date').between(first, last, true, true).toArray(),
     ])
@@ -58,23 +58,24 @@ export function CalendarMonth() {
         <div className="cal-grid">
           {monthGrid(month).map((d, i) => {
             if (!d) return <div key={`b${i}`} className="cal-cell blank" />
-            const appts = (data?.appts ?? []).filter((t) => coversDay(t, d)).sort((a, b) => (timeOnDay(a, d) ?? '').localeCompare(timeOnDay(b, d) ?? ''))
+            // Appointments and events first, then to-dos; each by time.
+            const appts = (data?.appts ?? []).filter((t) => coversDay(t, d)).sort((a, b) =>
+              Number(a.kind === 'todo') - Number(b.kind === 'todo') || (timeOnDay(a, d) ?? '99').localeCompare(timeOnDay(b, d) ?? '99'))
             const abstinent = d <= today
               ? activeSubstances(data?.substances ?? [], d).filter((s) => data?.logs.has(logKey(s.id!, d)))
               : []
             return (
               <button key={d} className={`cal-cell ${d === today ? 'today' : ''}`} onClick={() => navigate(`/tag/${d}`)}>
                 <span className="d num">{Number(d.slice(8))}</span>
-                {appts.slice(0, 3).map((t) => {
+                {appts.slice(0, 4).map((t) => {
                   const done = doneStyle(t)
-                  const time = timeOnDay(t, d)
                   return (
                     <span key={t.id} className={`appt ${done.className}`} style={{ color: todoColor(t), ...done.style }}>
-                      {time ? `${time.split('–')[0]} ` : ''}{t.title}
+                      {KIND_MARK[t.kind]}{t.title}
                     </span>
                   )
                 })}
-                {appts.length > 3 && <span className="appt muted">+{appts.length - 3}</span>}
+                {appts.length > 4 && <span className="appt muted">+{appts.length - 4}</span>}
                 {abstinent.length > 0 && (
                   <span className="icons">
                     {abstinent.map((s) => <SubstanceGlyph key={s.id} icon={s.icon} size={13} />)}
@@ -85,7 +86,7 @@ export function CalendarMonth() {
           })}
         </div>
       </div>
-      <p className="tiny muted" style={{ marginTop: 10 }}>Nach rechts wischen: vorheriger Monat. Tag antippen: Tagesblatt.</p>
+      <p className="tiny muted" style={{ marginTop: 10 }}>◆ Termin · ▰ Event · ohne Zeichen: To-Do. Nach rechts wischen: vorheriger Monat. Tag antippen: Tagesblatt.</p>
     </div>
   )
 }
