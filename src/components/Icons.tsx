@@ -11,6 +11,8 @@ function Svg({ children, size = 22 }: { children: ReactNode; size?: number }) {
 }
 
 export const IconPlus = () => <Svg><path d="M12 5v14M5 12h14" /></Svg>
+export const IconHome = () => <Svg><path d="M4 11l8-7 8 7M6.5 9.5V20h11V9.5M10 20v-5h4v5" /></Svg>
+export const IconBook = () => <Svg><path d="M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5zM4 5.5v16M8 7h8" /></Svg>
 export const IconMinus = () => <Svg><path d="M5 12h14" /></Svg>
 export const IconBack = () => <Svg><path d="M15 5l-7 7 7 7" /></Svg>
 export const IconChevronLeft = () => <Svg><path d="M15 6l-6 6 6 6" /></Svg>

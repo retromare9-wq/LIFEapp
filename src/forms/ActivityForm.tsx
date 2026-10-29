@@ -1,27 +1,20 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, nowIso, type Activity } from '../db'
-import { ProjectSelect, Sheet, confirmDelete } from '../components/ui'
+import { DurationInput, ProjectSelect, RewardToggle, Sheet, confirmDelete } from '../components/ui'
 import { todayKey } from '../lib/date'
 
 export function ActivityForm({ activity, initial, onClose }: { activity?: Activity; initial?: Partial<Activity>; onClose: (saved?: boolean) => void }) {
   const today = todayKey()
   const [a, setA] = useState<Partial<Activity>>(activity ?? { title: '', ...initial })
-  // Without a date the activity counts as done today; a future date makes it a planned activity.
-  const [doneOverride, setDoneOverride] = useState<boolean | undefined>(activity?.done)
   const set = (patch: Partial<Activity>) => setA((prev) => ({ ...prev, ...patch }))
-  const names = useLiveQuery(async () => {
-    const all = await db.activities.orderBy('title').uniqueKeys()
-    return all as string[]
-  }) ?? []
+  const names = useLiveQuery(async () => (await db.activities.orderBy('title').uniqueKeys()) as string[]) ?? []
   const habitExists = useLiveQuery(
     async () => !!a.title?.trim() && (await db.habits.filter((h) => h.name === a.title!.trim()).count()) > 0,
     [a.title],
   )
-
+  // Without a date the activity counts for today; a future date makes it a planned activity.
   const date = a.date ?? today
-  const isFuture = date > today
-  const done = doneOverride ?? !isFuture
 
   const save = async () => {
     if (!a.title?.trim()) return
@@ -30,9 +23,10 @@ export function ActivityForm({ activity, initial, onClose }: { activity?: Activi
       date,
       timeFrom: a.timeFrom,
       timeTo: a.timeTo,
+      durationMinutes: a.durationMinutes,
       projectId: a.projectId,
       note: a.note?.trim() || undefined,
-      done,
+      noReward: !!a.noReward,
     }
     if (activity?.id != null) await db.activities.update(activity.id, data)
     else await db.activities.add({ ...data, createdAt: nowIso() })
@@ -42,17 +36,17 @@ export function ActivityForm({ activity, initial, onClose }: { activity?: Activi
   const remove = async () => {
     if (activity?.id == null || !confirmDelete(activity.title)) return
     await db.activities.delete(activity.id)
+    if (activity.fromTodoId != null) await db.todos.update(activity.fromTodoId, { activityId: undefined })
     onClose()
   }
 
   const makeHabit = async () => {
     const name = a.title?.trim()
     if (!name) return
-    const order = (await db.habits.count()) + 1
-    const habitId = (await db.habits.add({ name, createdAt: today, order })) as number
+    const habitId = (await db.habits.add({ name, weeklyTarget: 7, createdAt: today, order: Date.now() })) as number
     // Earlier activities with the same name count as fulfilled days of the new habit.
-    const days = new Set((await db.activities.where('title').equals(name).toArray()).filter((x) => x.done).map((x) => x.date))
-    if (done) days.add(date)
+    const days = new Set((await db.activities.where('title').equals(name).toArray()).filter((x) => x.date <= today).map((x) => x.date))
+    if (date <= today) days.add(date)
     await db.habitLogs.bulkAdd([...days].map((d) => ({ habitId, date: d })))
     window.alert(`„${name}“ ist jetzt ein Habit (${days.size} bisherige Tage übernommen).`)
   }
@@ -72,10 +66,11 @@ export function ActivityForm({ activity, initial, onClose }: { activity?: Activi
             ))}
           </div>
         )}
+        <DurationInput label="Dauer (optional)" value={a.durationMinutes} onChange={(durationMinutes) => set({ durationMinutes })} />
         <ProjectSelect value={a.projectId} onChange={(projectId) => set({ projectId })} />
         <label className="field">
-          Datum (leer = heute erledigt, Zukunft = geplant)
-          <input type="date" value={a.date ?? ''} onChange={(e) => { set({ date: e.target.value || undefined }); setDoneOverride(undefined) }} />
+          Datum (leer = heute, Zukunft = geplant)
+          <input type="date" value={a.date ?? ''} onChange={(e) => set({ date: e.target.value || undefined })} />
         </label>
         <div className="row">
           <label className="field grow">
@@ -91,10 +86,7 @@ export function ActivityForm({ activity, initial, onClose }: { activity?: Activi
           Notiz (optional)
           <textarea style={{ minHeight: 60 }} value={a.note ?? ''} onChange={(e) => set({ note: e.target.value })} />
         </label>
-        <label className="check">
-          <input type="checkbox" checked={done} onChange={(e) => setDoneOverride(e.target.checked)} />
-          {isFuture ? 'Bereits erledigt' : 'Erledigt'}
-        </label>
+        {a.fromTodoId == null && <RewardToggle noReward={a.noReward} onChange={(noReward) => set({ noReward })} />}
         {a.title?.trim() && !habitExists && (
           <button type="button" className="btn ghost small" onClick={makeHabit}>
             Als Habit etablieren →

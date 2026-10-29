@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, nowIso, type TagScope } from '../db'
 import { todayKey } from '../lib/date'
-import { IconBack, IconCheck, IconMinus, IconPlus } from './Icons'
+import { IconBack, IconCheck, IconHome, IconMinus, IconPlus } from './Icons'
+import { TODO_COLORS } from '../lib/colors'
 
 export function TopBar({
   title, back = true, onAdd, deleteMode, onToggleDelete, children,
@@ -55,7 +56,8 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
     }
   }, [onClose])
   return (
-    <div className="sheet-backdrop" onClick={() => onClose()}>
+    <div className="sheet-backdrop" onClick={() => onClose()}
+      onTouchStart={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}>
       <div className="sheet" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <h2>{title}</h2>
         {children}
@@ -202,4 +204,65 @@ export function SearchInput({ value, onChange, placeholder = 'Suchen …' }: { v
 
 export function confirmDelete(what: string) {
   return window.confirm(`„${what}“ wirklich löschen?`)
+}
+
+/** Round button in the bottom centre that leads back to the start page. */
+export function HomeButton() {
+  const navigate = useNavigate()
+  return (
+    <button className="home-btn" aria-label="Startseite" onClick={() => navigate('/')}>
+      <IconHome />
+    </button>
+  )
+}
+
+export function ColorPicker({ value, onChange }: { value?: string; onChange: (key: string) => void }) {
+  return (
+    <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="small muted">Farbe</span>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {TODO_COLORS.map((c) => (
+          <button key={c.key} type="button" aria-label={c.label} title={c.label} aria-pressed={value === c.key}
+            onClick={() => onChange(c.key)}
+            style={{
+              width: 32, height: 32, borderRadius: '50%', background: c.value, padding: 0,
+              border: value === c.key ? '3px solid #fff' : '2px solid transparent',
+              boxShadow: value === c.key ? `0 0 10px ${c.value}` : undefined,
+            }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Hours + minutes input that stores whole minutes (undefined = no duration). */
+export function DurationInput({ label, value, onChange }: { label: string; value?: number; onChange: (v?: number) => void }) {
+  const h = value ? Math.floor(value / 60) : ''
+  const m = value ? value % 60 : ''
+  const update = (hours: string, minutes: string) => {
+    const total = (Number(hours) || 0) * 60 + (Number(minutes) || 0)
+    onChange(total > 0 ? total : undefined)
+  }
+  return (
+    <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="small muted">{label}</span>
+      <div className="row">
+        <input type="number" inputMode="numeric" min={0} placeholder="0" value={h} style={{ width: 80 }}
+          onChange={(e) => update(e.target.value, String(m))} />
+        <span className="muted">h</span>
+        <input type="number" inputMode="numeric" min={0} max={59} placeholder="0" value={m} style={{ width: 80 }}
+          onChange={(e) => update(String(h), e.target.value)} />
+        <span className="muted">min</span>
+      </div>
+    </div>
+  )
+}
+
+export function RewardToggle({ noReward, onChange }: { noReward?: boolean; onChange: (noReward: boolean) => void }) {
+  return (
+    <label className="check">
+      <input type="checkbox" checked={!noReward} onChange={(e) => onChange(!e.target.checked)} />
+      km/Credits dafür verdienen
+    </label>
+  )
 }

@@ -3,22 +3,41 @@ import Dexie, { type EntityTable } from 'dexie'
 // Dates are stored as local 'YYYY-MM-DD' strings, times as 'HH:mm'.
 
 export type Relevance = 'low' | 'mid' | 'high'
+export type TodoKind = 'todo' | 'appointment' | 'event'
+
+export interface ChecklistItem {
+  id: string
+  text: string
+  done: boolean
+}
 
 export interface Todo {
   id?: number
   title: string
+  /** Only decides the km/credits reward. */
   relevance: Relevance
+  kind: TodoKind
+  color: string
   projectId?: number
   groupId?: number
   date?: string
+  /** start time */
   time?: string
-  isAppointment: boolean
+  /** end time (on endDate for multi-day events) */
+  timeTo?: string
+  /** last day of a multi-day event */
+  endDate?: string
+  budgetMinutes?: number
+  checklist: ChecklistItem[]
   /** When completed, also log it as an activity of that day. */
   logAsActivity: boolean
+  noReward?: boolean
   done: boolean
   doneAt?: string
   activityId?: number
   createdAt: string
+  /** @deprecated replaced by kind (v1 data) */
+  isAppointment?: boolean
 }
 
 export interface Activity {
@@ -27,10 +46,12 @@ export interface Activity {
   date: string
   timeFrom?: string
   timeTo?: string
+  durationMinutes?: number
   projectId?: number
   note?: string
-  /** false = planned and not yet done */
-  done: boolean
+  /** @deprecated activities count as done once their date has come (v1 data) */
+  done?: boolean
+  noReward?: boolean
   fromTodoId?: number
   createdAt: string
 }
@@ -38,6 +59,9 @@ export interface Activity {
 export interface Habit {
   id?: number
   name: string
+  description?: string
+  /** target completions per week (1–7) */
+  weeklyTarget: number
   createdAt: string
   order: number
 }
@@ -55,6 +79,8 @@ export interface Substance {
   name: string
   icon: SubstanceIcon
   startDate: string
+  /** why staying abstinent matters */
+  reason?: string
   order: number
 }
 
@@ -142,7 +168,33 @@ export interface ProjectGroup {
   order: number
 }
 
-export type TagScope = 'note' | 'dream' | 'image'
+export type BookStatus = 'planned' | 'reading' | 'finished' | 'dnf'
+
+export interface Book {
+  id?: number
+  title: string
+  author: string
+  tags: string[]
+  status: BookStatus
+  startDate?: string
+  endDate?: string
+  totalPages?: number
+  /** 1–5, only for finished books */
+  rating?: number
+  noReward?: boolean
+  createdAt: string
+}
+
+export interface ReadingLog {
+  id?: number
+  bookId: number
+  date: string
+  pages: number
+  thoughts?: string
+  createdAt: string
+}
+
+export type TagScope = 'note' | 'dream' | 'image' | 'book'
 
 export interface Tag {
   id?: number
@@ -172,6 +224,8 @@ export const db = new Dexie('lifeapp') as Dexie & {
   projectGroups: EntityTable<ProjectGroup, 'id'>
   tags: EntityTable<Tag, 'id'>
   settings: EntityTable<Setting, 'key'>
+  books: EntityTable<Book, 'id'>
+  readingLogs: EntityTable<ReadingLog, 'id'>
 }
 
 db.version(1).stores({
@@ -193,10 +247,35 @@ db.version(1).stores({
   settings: 'key',
 })
 
+const RELEVANCE_COLOR: Record<Relevance, string> = { low: 'lightblue', mid: 'orange', high: 'red' }
+
+db.version(2).stores({
+  books: '++id, status, *tags',
+  readingLogs: '++id, bookId, date',
+}).upgrade(async (tx) => {
+  await tx.table('todos').toCollection().modify(normalizeTodo)
+  await tx.table('habits').toCollection().modify(normalizeHabit)
+  await tx.table('activities').toCollection().modify(normalizeActivity)
+})
+
+/** Brings rows written by app version 1 (database or backup file) into the current shape. Idempotent. */
+export function normalizeTodo(t: Todo) {
+  if (!t.kind) t.kind = t.isAppointment ? 'appointment' : 'todo'
+  if (!t.color) t.color = RELEVANCE_COLOR[t.relevance] ?? 'lightblue'
+  if (!t.checklist) t.checklist = []
+  delete t.isAppointment
+}
+export function normalizeHabit(h: Habit) {
+  if (!h.weeklyTarget) h.weeklyTarget = 7
+}
+export function normalizeActivity(a: Activity) {
+  delete a.done
+}
+
 export const ALL_TABLES = [
   'todos', 'activities', 'habits', 'habitLogs', 'substances', 'abstinenceLogs',
   'abstinenceImages', 'monthImages', 'notes', 'attachments', 'moods', 'dreams',
-  'projects', 'projectGroups', 'tags', 'settings',
+  'projects', 'projectGroups', 'tags', 'settings', 'books', 'readingLogs',
 ] as const
 
 export function nowIso() {
@@ -216,7 +295,7 @@ export async function deleteAttachments(ownerType: OwnerType, ownerId: number) {
 }
 
 /** Marks a to-do done/undone and keeps the linked activity in sync. */
-export async function setTodoDone(todo: Todo, done: boolean, today: string) {
+export async function setTodoDone(todo: Todo, done: boolean, today: string, durationMinutes?: number) {
   if (todo.id == null) return
   await db.transaction('rw', db.todos, db.activities, async () => {
     if (done) {
@@ -226,8 +305,9 @@ export async function setTodoDone(todo: Todo, done: boolean, today: string) {
           title: todo.title,
           date: todo.date && todo.date < today ? todo.date : today,
           timeFrom: todo.time,
+          timeTo: todo.timeTo,
+          durationMinutes,
           projectId: todo.projectId,
-          done: true,
           fromTodoId: todo.id,
           createdAt: nowIso(),
         })

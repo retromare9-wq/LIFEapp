@@ -1,7 +1,9 @@
 import { zipSync, strToU8 } from 'fflate'
 import { getISOWeek, getISOWeekYear } from 'date-fns'
-import { ALL_TABLES, db, type Attachment, type OwnerType } from '../db'
-import { fmtDateTime, fmtShort, fromKey, toKey, todayKey } from './date'
+import { ALL_TABLES, db, normalizeActivity, normalizeHabit, normalizeTodo, type Activity, type Attachment, type Habit, type OwnerType, type Todo } from '../db'
+import { fmtDateTime, fmtDuration, fmtShort, fromKey, toKey, todayKey } from './date'
+import { KIND_LABEL, todoWhen } from './todo'
+import { computeRelapses } from './relapse'
 import { currentStreak } from './stats'
 
 const MOOD_NAMES = ['', 'sehr schlecht', 'schlecht', 'okay', 'gut', 'super']
@@ -57,7 +59,8 @@ export async function exportTextZip() {
   }
 
   const todoLine = (t: (typeof todos)[number]) =>
-    `[${t.done ? 'x' : ' '}] ${t.title}  (${REL_NAMES[t.relevance]}${t.isAppointment ? ', Termin' : ''}${t.date ? `, ${fmtDateTime(t.date, t.time)}` : ''}${t.projectId ? `, Projekt: ${projectName(t.projectId)}` : ''})`
+    `[${t.done ? 'x' : ' '}] ${t.title}  (${[KIND_LABEL[t.kind], REL_NAMES[t.relevance], todoWhen(t), t.projectId ? `Projekt: ${projectName(t.projectId)}` : ''].filter(Boolean).join(', ')})` +
+    (t.checklist?.length ? '\n' + t.checklist.map((c) => `      [${c.done ? 'x' : ' '}] ${c.text}`).join('\n') : '')
   files['todos.txt'] = strToU8([
     'TO-DOS – OFFEN', '', ...todos.filter((t) => !t.done).map(todoLine), '',
     'TO-DOS – ERLEDIGT', '',
@@ -66,7 +69,7 @@ export async function exportTextZip() {
   ].join('\n'))
 
   files['aktivitaeten.txt'] = strToU8('AKTIVITÄTEN\n' + byWeek(activities, (a) =>
-    `${fmtShort(a.date)} ${[a.timeFrom, a.timeTo].filter(Boolean).join('–')}  ${a.title}${a.done ? '' : ' (geplant)'}${a.projectId ? `  [Projekt: ${projectName(a.projectId)}]` : ''}${a.note ? `\n  ${a.note}` : ''}`))
+    `${fmtShort(a.date)} ${[a.timeFrom, a.timeTo].filter(Boolean).join('–')}  ${a.title}${a.durationMinutes ? ` (${fmtDuration(a.durationMinutes)})` : ''}${a.date > today ? ' (geplant)' : ''}${a.projectId ? `  [Projekt: ${projectName(a.projectId)}]` : ''}${a.note ? `\n  ${a.note}` : ''}`))
 
   files['habits.txt'] = strToU8('HABITS\n\n' + habits.map((h) => {
     const dates = new Set(habitLogs.filter((l) => l.habitId === h.id).map((l) => l.date))
@@ -102,6 +105,25 @@ export async function exportTextZip() {
       pt.filter((t) => t.groupId === g.id).forEach((t) => lines.push(`    ${todoLine(t)}`))
     })
     return lines.join('\n')
+  }).join('\n\n'))
+
+  const [books, readingLogs] = await Promise.all([db.books.toArray(), db.readingLogs.toArray()])
+  const BOOK_STATUS = { planned: 'Wunschliste', reading: 'lese ich gerade', finished: 'gelesen', dnf: 'DNF' }
+  files['lesen.txt'] = strToU8('LESELISTE\n\n' + books.map((b) => {
+    const logs = readingLogs.filter((l) => l.bookId === b.id).sort((x, y) => x.date.localeCompare(y.date))
+    const pages = logs.reduce((s, l) => s + (l.pages || 0), 0)
+    return [
+      `${b.title}${b.author ? ` – ${b.author}` : ''}  [${BOOK_STATUS[b.status]}${b.rating ? `, ${'★'.repeat(b.rating)}` : ''}]`,
+      `  ${[b.startDate && `Beginn ${fmtShort(b.startDate)}`, b.endDate && `Ende ${fmtShort(b.endDate)}`, `${pages} Seiten`, b.tags.map((t) => `#${t}`).join(' ')].filter(Boolean).join(' | ')}`,
+      ...logs.map((l) => `  ${fmtShort(l.date)}: ${l.pages} Seiten${l.thoughts ? `\n    ${l.thoughts}` : ''}`),
+    ].join('\n')
+  }).join('\n\n'))
+
+  files['rueckfaelle.txt'] = strToU8('RÜCKFÄLLE\n\n' + substances.map((s) => {
+    const confirmed = new Set(absLogs.filter((l) => l.substanceId === s.id).map((l) => l.date))
+    const relapses = computeRelapses(s, confirmed, today)
+    return [`${s.name}: ${relapses.length} Rückfälle`, ...relapses.map((r) =>
+      `  ${fmtShort(r.start)}${r.lastMiss !== r.start ? `–${fmtShort(r.lastMiss)}` : ''} | Rückfallphase ${r.phaseEnd ? `bis ${fmtShort(r.phaseEnd)}` : 'läuft'} (${r.phaseDays} Tage)`)].join('\n')
   }).join('\n\n'))
 
   download(new Blob([zipSync(files) as BlobPart], { type: 'application/zip' }), `lifeapp-export-${today}.zip`)
@@ -142,6 +164,9 @@ export async function importBackup(file: File) {
     prepared[name] = await Promise.all((data[name] ?? []).map(async (r) =>
       typeof r.blob === 'string' ? { ...r, blob: await dataUrlToBlob(r.blob) } : r))
   }
+  prepared.todos.forEach((r) => normalizeTodo(r as unknown as Todo))
+  prepared.habits.forEach((r) => normalizeHabit(r as unknown as Habit))
+  prepared.activities.forEach((r) => normalizeActivity(r as unknown as Activity))
   await db.transaction('rw', ALL_TABLES.map((n) => db.table(n)), async () => {
     for (const name of ALL_TABLES) {
       await db.table(name).clear()

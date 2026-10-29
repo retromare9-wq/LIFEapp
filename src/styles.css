@@ -100,8 +100,9 @@ a { color: inherit; text-decoration: none; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 44px; padding: 0 16px;
   border-radius: 10px; border: 1px solid var(--line-strong);
-  background: var(--surface-2); color: var(--text); font-weight: 500; white-space: nowrap;
+  background: var(--surface-2); color: var(--text); font-weight: 500; text-align: center;
 }
+.quick-grid .btn, .home-nav .btn, .sheet-actions .btn { white-space: nowrap; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { border-color: var(--red); color: var(--red); background: transparent; }
 .btn.ghost { border-color: var(--line); background: transparent; }
@@ -337,3 +338,22 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; 
   display: flex; align-items: flex-end; text-align: left;
 }
 .img-tile span { background: rgba(0, 0, 0, .7); border-radius: 4px; padding: 1px 4px; }
+
+/* ---------- home button ---------- */
+.home-btn {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 40;
+  width: 58px; height: 58px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff;
+  background: #05051a;
+  border: 2px solid transparent;
+  background-image: linear-gradient(#05051a, #05051a), var(--grad);
+  background-origin: border-box; background-clip: padding-box, border-box;
+  box-shadow: 0 0 18px rgba(138, 61, 255, .45), 0 6px 18px rgba(0, 0, 0, .8);
+}
+.home-btn svg { width: 26px; height: 26px; }
+.abst-btn { flex-direction: column; align-items: stretch; }
+.abst-name { background: none; border: none; padding: 0; text-align: left; font-size: 17px; font-weight: 500; color: var(--text); }
+.reward-row { display: grid; grid-template-columns: 1fr 72px 72px; gap: 6px; align-items: center; padding: 3px 0; }
+.reward-row input { min-height: 38px; padding: 6px 8px; text-align: right; }
+.score-big { font-size: 28px; font-weight: 600; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }

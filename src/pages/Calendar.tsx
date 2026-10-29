@@ -1,13 +1,18 @@
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, setTodoDone } from '../db'
-import { WEEKDAYS, addMonths, fmtLong, fmtMonthYear, fmtWeekday, monthDayKeys, monthGrid, shiftKey, todayKey } from '../lib/date'
+import { db, type Activity, type Todo } from '../db'
+import { WEEKDAYS, addMonths, fmtDuration, fmtLong, fmtMonthYear, fmtWeekday, monthDayKeys, monthGrid, shiftKey, todayKey } from '../lib/date'
 import { activeSubstances, logKey } from '../lib/stats'
 import { useDaySheetConfig } from '../lib/settings'
-import { Checkbox, TopBar, useSwipe } from '../components/ui'
-import { IconCalendar, IconChevronLeft, IconChevronRight, SubstanceGlyph } from '../components/Icons'
+import { coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
+import { Sheet, TopBar, useSwipe } from '../components/ui'
+import { IconCalendar, IconChevronLeft, IconChevronRight, IconPlus, SubstanceGlyph } from '../components/Icons'
 import { moodLabel } from '../forms/JournalForms'
+import { TodoForm } from '../forms/TodoForm'
+import { ActivityForm } from '../forms/ActivityForm'
+import { ActivityItem } from './Activities'
+import { TodoItem } from './Todos'
 
 export function MonthNav({ month, onChange }: { month: Date; onChange: (d: Date) => void }) {
   return (
@@ -19,6 +24,13 @@ export function MonthNav({ month, onChange }: { month: Date; onChange: (d: Date)
   )
 }
 
+/** All dated to-dos that touch the range [first, last] (multi-day events included). */
+const todosInRange = (first: string, last: string) =>
+  db.todos.where('date').belowOrEqual(last).filter((t) => {
+    for (let d = first; d <= last; d = shiftKey(d, 1)) if (coversDay(t, d)) return true
+    return false
+  }).toArray()
+
 export function CalendarMonth() {
   const navigate = useNavigate()
   const today = todayKey()
@@ -29,12 +41,12 @@ export function CalendarMonth() {
   const last = keys[keys.length - 1]
 
   const data = useLiveQuery(async () => {
-    const [appts, substances, logs] = await Promise.all([
-      db.todos.where('date').between(first, last, true, true).filter((t) => t.isAppointment).toArray(),
+    const [todos, substances, logs] = await Promise.all([
+      todosInRange(first, last).then((list) => list.filter((t) => t.kind !== 'todo')),
       db.substances.orderBy('order').toArray(),
       db.abstinenceLogs.where('date').between(first, last, true, true).toArray(),
     ])
-    return { appts, substances, logs: new Set(logs.map((l) => logKey(l.substanceId, l.date))) }
+    return { appts: todos, substances, logs: new Set(logs.map((l) => logKey(l.substanceId, l.date))) }
   }, [first])
 
   return (
@@ -46,18 +58,22 @@ export function CalendarMonth() {
         <div className="cal-grid">
           {monthGrid(month).map((d, i) => {
             if (!d) return <div key={`b${i}`} className="cal-cell blank" />
-            const appts = (data?.appts ?? []).filter((t) => t.date === d).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''))
+            const appts = (data?.appts ?? []).filter((t) => coversDay(t, d)).sort((a, b) => (timeOnDay(a, d) ?? '').localeCompare(timeOnDay(b, d) ?? ''))
             const abstinent = d <= today
               ? activeSubstances(data?.substances ?? [], d).filter((s) => data?.logs.has(logKey(s.id!, d)))
               : []
             return (
               <button key={d} className={`cal-cell ${d === today ? 'today' : ''}`} onClick={() => navigate(`/tag/${d}`)}>
                 <span className="d num">{Number(d.slice(8))}</span>
-                {appts.slice(0, 3).map((t) => (
-                  <span key={t.id} className={`appt rel-${t.relevance} ${t.done ? 'done-text' : ''}`}>
-                    {t.time ? `${t.time} ` : ''}{t.title}
-                  </span>
-                ))}
+                {appts.slice(0, 3).map((t) => {
+                  const done = doneStyle(t)
+                  const time = timeOnDay(t, d)
+                  return (
+                    <span key={t.id} className={`appt ${done.className}`} style={{ color: todoColor(t), ...done.style }}>
+                      {time ? `${time.split('–')[0]} ` : ''}{t.title}
+                    </span>
+                  )
+                })}
                 {appts.length > 3 && <span className="appt muted">+{appts.length - 3}</span>}
                 {abstinent.length > 0 && (
                   <span className="icons">
@@ -88,11 +104,15 @@ export function DaySheet() {
   const navigate = useNavigate()
   const today = todayKey()
   const cfg = useDaySheetConfig()
-  const swipe = useSwipe(() => navigate(`/tag/${shiftKey(date, -1)}`, { replace: true }), () => navigate(`/tag/${shiftKey(date, 1)}`, { replace: true }))
+  const [adding, setAdding] = useState<'choose' | 'todo' | 'activity'>()
+  const [editTodo, setEditTodo] = useState<Todo>()
+  const [editActivity, setEditActivity] = useState<Activity>()
+  const go = (days: number) => navigate(`/tag/${shiftKey(date, days)}`, { replace: true })
+  const swipe = useSwipe(() => go(-1), () => go(1))
 
   const data = useLiveQuery(async () => {
-    const [todos, activities, habitLogs, habits, substances, absLogs, moods, dreams, notes] = await Promise.all([
-      db.todos.where('date').equals(date).toArray(),
+    const [todos, activities, habitLogs, habits, substances, absLogs, moods, dreams, notes, reading] = await Promise.all([
+      todosInRange(date, date),
       db.activities.where('date').equals(date).toArray(),
       db.habitLogs.where('date').equals(date).toArray(),
       db.habits.count(),
@@ -101,83 +121,77 @@ export function DaySheet() {
       db.moods.where('date').equals(date).toArray(),
       db.dreams.where('date').equals(date).count(),
       db.notes.where('date').equals(date).toArray(),
+      db.readingLogs.where('date').equals(date).toArray(),
     ])
-    const sortT = (a: { time?: string }, b: { time?: string }) => (a.time ?? '99').localeCompare(b.time ?? '99')
+    const sortT = (a: Todo, b: Todo) => (timeOnDay(a, date) ?? '99').localeCompare(timeOnDay(b, date) ?? '99')
     return {
-      todos: todos.filter((t) => !t.isAppointment).sort(sortT),
-      appts: todos.filter((t) => t.isAppointment).sort(sortT),
-      activities, habitsDone: habitLogs.length, habits,
+      todos: todos.filter((t) => t.kind === 'todo').sort(sortT),
+      appts: todos.filter((t) => t.kind !== 'todo').sort(sortT),
+      activities: activities.sort((a, b) => (a.timeFrom ?? '99').localeCompare(b.timeFrom ?? '99')),
+      habitsDone: habitLogs.length, habits,
       substances: activeSubstances(substances, date),
       absLogs: new Set(absLogs.map((l) => l.substanceId)),
-      moods, dreams, notes,
+      moods: moods.sort((a, b) => (a.time ?? '').localeCompare(b.time ?? '')),
+      dreams, notes,
+      pages: reading.reduce((s, l) => s + (l.pages || 0), 0),
     }
   }, [date])
 
   if (!data) return <div className="page"><TopBar title={fmtLong(date)} /></div>
-
-  const TodoRow = ({ t }: { t: (typeof data.todos)[number] }) => (
-    <div className={`item rel-${t.relevance}`}>
-      <span className="stripe rel-bg" />
-      <div className="grow">
-        <div className={`title ${t.done ? 'done-text' : ''}`}>{t.title}</div>
-        {t.time && <div className="meta num">{t.time}</div>}
-      </div>
-      <Checkbox on={t.done} onChange={() => setTodoDone(t, !t.done, today)} />
-    </div>
-  )
+  const counted = date <= today ? data.activities : []
+  const totalMinutes = counted.reduce((s, a) => s + (a.durationMinutes ?? 0), 0)
 
   return (
     <div className="page" {...swipe}>
-      <TopBar title={fmtLong(date)}>
-        <Link to="/kalender" className="icon-btn" aria-label="Monat"><IconCalendar /></Link>
+      <TopBar title={fmtLong(date)} onAdd={() => setAdding('choose')}>
+        <button className="icon-btn" aria-label="Monat" onClick={() => navigate('/kalender')}><IconCalendar /></button>
       </TopBar>
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
         <span className="muted" style={{ textTransform: 'capitalize' }}>{fmtWeekday(date)}{date === today ? ' · heute' : ''}</span>
         <div className="row" style={{ gap: 6 }}>
-          <button className="icon-btn" aria-label="Vortag" onClick={() => navigate(`/tag/${shiftKey(date, -1)}`, { replace: true })}><IconChevronLeft /></button>
-          <button className="icon-btn" aria-label="Folgetag" onClick={() => navigate(`/tag/${shiftKey(date, 1)}`, { replace: true })}><IconChevronRight /></button>
+          <button className="icon-btn" aria-label="Vortag" onClick={() => go(-1)}><IconChevronLeft /></button>
+          <button className="icon-btn" aria-label="Folgetag" onClick={() => go(1)}><IconChevronRight /></button>
         </div>
       </div>
 
       {cfg.appointments && (
         <>
-          <div className="section-title">Termine</div>
-          {data.appts.length ? <div className="list">{data.appts.map((t) => <TodoRow key={t.id} t={t} />)}</div> : <div className="small muted">Keine Termine</div>}
+          <div className="section-title">Termine & Events</div>
+          {data.appts.length ? <div className="list">{data.appts.map((t) => <TodoItem key={t.id} t={t} onEdit={() => setEditTodo(t)} />)}</div> : <div className="small muted">Keine Termine</div>}
         </>
       )}
       {cfg.todos && (
         <>
           <div className="section-title">To-Dos</div>
-          {data.todos.length ? <div className="list">{data.todos.map((t) => <TodoRow key={t.id} t={t} />)}</div> : <div className="small muted">Keine To-Dos</div>}
+          {data.todos.length ? <div className="list">{data.todos.map((t) => <TodoItem key={t.id} t={t} onEdit={() => setEditTodo(t)} />)}</div> : <div className="small muted">Keine To-Dos</div>}
         </>
       )}
 
       <div className="section-title">Überblick</div>
       <div className="card" style={{ padding: '2px 14px' }}>
-        {cfg.activities && <Line label="Aktivitäten" value={<span className="num">{data.activities.filter((a) => a.done).length}</span>} />}
+        {cfg.activities && <Line label="Aktivitäten" value={<span className="num">{counted.length}{totalMinutes ? ` · ${fmtDuration(totalMinutes)}` : ''}</span>} />}
         {cfg.habits && <Line label="Erfüllte Habits" value={<span className="num">{data.habitsDone} / {data.habits}</span>} />}
         {cfg.abstinence && data.substances.map((s) => {
           const ok = data.absLogs.has(s.id!)
           return <Line key={s.id} label={`Frei von ${s.name}`} value={ok ? 'ja' : date <= today ? 'nein' : '—'} ok={ok} />
         })}
-        {cfg.mood && <Line label="Gefühlsbuch" value={data.moods.length ? `ja (${data.moods.map((m) => moodLabel(m.mood)).join(', ')})` : 'nein'} ok={data.moods.length > 0} />}
+        {cfg.mood && (
+          <Line label="Gefühlsbuch" ok={data.moods.length > 0} value={data.moods.length ? (
+            <span className="row" style={{ gap: 6 }}>
+              ja
+              {data.moods.map((m) => <span key={m.id} className="dot" style={{ width: 14, height: 14, background: `var(--mood-${m.mood})` }} title={moodLabel(m.mood)} />)}
+            </span>
+          ) : 'nein'} />
+        )}
         {cfg.dream && <Line label="Traumbuch" value={data.dreams ? 'ja' : 'nein'} ok={data.dreams > 0} />}
+        {cfg.reading && <Line label="Gelesene Seiten" value={<span className="num">{data.pages}</span>} />}
         {cfg.money && <Line label="Geld ausgegeben" value={<span className="muted">Finanzbuch folgt</span>} />}
       </div>
 
       {cfg.activityList && data.activities.length > 0 && (
         <>
           <div className="section-title">Aktivitäten</div>
-          <div className="list">
-            {data.activities.map((a) => (
-              <div key={a.id} className="item">
-                <div className="grow">
-                  <div className={`title ${a.done ? '' : 'muted'}`}>{a.title}</div>
-                  <div className="meta num">{[a.timeFrom, a.timeTo].filter(Boolean).join('–')}{a.done ? '' : ' geplant'}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <div className="list">{data.activities.map((a) => <ActivityItem key={a.id} a={a} onEdit={() => setEditActivity(a)} />)}</div>
         </>
       )}
       {cfg.notes && data.notes.length > 0 && (
@@ -190,7 +204,20 @@ export function DaySheet() {
           </div>
         </>
       )}
-      <p className="tiny muted" style={{ marginTop: 16 }}>Angezeigte Infos lassen sich in den Einstellungen anpassen.</p>
+      <p className="tiny muted" style={{ marginTop: 16 }}>Erledigen geht in der To-Do-Liste. Angezeigte Infos lassen sich in den Einstellungen anpassen.</p>
+
+      {adding === 'choose' && (
+        <Sheet title={`Für ${fmtLong(date)} hinzufügen`} onClose={() => setAdding(undefined)}>
+          <div className="stack">
+            <button className="btn" onClick={() => setAdding('todo')}><IconPlus /> To-Do / Termin / Event</button>
+            <button className="btn" onClick={() => setAdding('activity')}><IconPlus /> Aktivität</button>
+          </div>
+        </Sheet>
+      )}
+      {adding === 'todo' && <TodoForm initial={{ date }} onClose={() => setAdding(undefined)} />}
+      {adding === 'activity' && <ActivityForm initial={{ date }} onClose={() => setAdding(undefined)} />}
+      {editTodo && <TodoForm todo={editTodo} onClose={() => setEditTodo(undefined)} />}
+      {editActivity && <ActivityForm activity={editActivity} onClose={() => setEditActivity(undefined)} />}
     </div>
   )
 }

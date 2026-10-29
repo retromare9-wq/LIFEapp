@@ -53,3 +53,16 @@ export function fmtDateTime(date?: string, time?: string) {
   if (!date) return ''
   return time ? `${fmtShort(date)}, ${time}` : fmtShort(date)
 }
+
+/** 90 → "1 h 30 min" */
+export function fmtDuration(minutes?: number) {
+  if (!minutes) return ''
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return [h ? `${h} h` : '', m ? `${m} min` : ''].filter(Boolean).join(' ')
+}
+
+/** Number of days from a to b. */
+export function daysBetween(a: string, b: string) {
+  return Math.round((fromKey(b).getTime() - fromKey(a).getTime()) / 864e5)
+}

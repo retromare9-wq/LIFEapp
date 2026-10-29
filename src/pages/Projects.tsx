@@ -5,7 +5,7 @@ import { db, nowIso, type Activity, type Project, type ProjectStatus, type Todo 
 import { fmtShort, todayKey } from '../lib/date'
 import { DeleteHint, Sheet, TopBar } from '../components/ui'
 import { IconCheck, IconPlus, IconTrash, IconX } from '../components/Icons'
-import { TodoForm } from '../forms/TodoForm'
+import { TodoForm, useTodoCompletion } from '../forms/TodoForm'
 import { NoteForm } from '../forms/JournalForms'
 import { TodoItem } from './Todos'
 import { ActivityItem } from './Activities'
@@ -150,6 +150,7 @@ export function ProjectDetail() {
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
   const [todoForm, setTodoForm] = useState<Todo | { groupId?: number }>()
+  const completion = useTodoCompletion()
   const [noteForm, setNoteForm] = useState(false)
   const [activityForm, setActivityForm] = useState<Activity | 'new'>()
   const [newGroup, setNewGroup] = useState('')
@@ -170,7 +171,7 @@ export function ProjectDetail() {
   const sortTodos = (list: Todo[]) => [...list].sort((a, b) => Number(a.done) - Number(b.done) || `${a.date ?? '9'}${a.time ?? ''}`.localeCompare(`${b.date ?? '9'}${b.time ?? ''}`))
   const todoList = (list: Todo[]) => (
     <div className="list">
-      {sortTodos(list).map((t) => <TodoItem key={t.id} t={t} onEdit={() => setTodoForm(t)} />)}
+      {sortTodos(list).map((t) => <TodoItem key={t.id} t={t} onEdit={() => setTodoForm(t)} onToggle={completion.toggle} />)}
     </div>
   )
   const ungrouped = todos.filter((t) => t.groupId == null || !groups.some((g) => g.id === t.groupId))
@@ -261,6 +262,7 @@ export function ProjectDetail() {
           ? <TodoForm todo={todoForm as Todo} onClose={() => setTodoForm(undefined)} />
           : <TodoForm initial={{ projectId, groupId: todoForm.groupId }} onClose={() => setTodoForm(undefined)} />
       )}
+      {completion.sheet}
       {noteForm && <NoteForm initial={{ projectId }} onClose={() => setNoteForm(false)} />}
       {activityForm && <ActivityForm activity={activityForm === 'new' ? undefined : activityForm} initial={{ projectId }} onClose={() => setActivityForm(undefined)} />}
     </div>

@@ -3,13 +3,14 @@ import { db } from '../db'
 
 export const DAY_SHEET_FIELDS = [
   { key: 'todos', label: 'To-Dos (mit Erledigt-Markierung)' },
-  { key: 'appointments', label: 'Termine' },
+  { key: 'appointments', label: 'Termine & Events' },
   { key: 'activities', label: 'Anzahl Aktivitäten' },
   { key: 'activityList', label: 'Liste der Aktivitäten' },
   { key: 'habits', label: 'Anzahl erfüllter Habits' },
   { key: 'abstinence', label: 'Abstinenz ja/nein' },
   { key: 'mood', label: 'Gefühlsbuch-Eintrag ja/nein' },
   { key: 'dream', label: 'Traumbuch-Eintrag ja/nein' },
+  { key: 'reading', label: 'Gelesene Seiten' },
   { key: 'notes', label: 'Ideen & Notizen des Tages' },
   { key: 'money', label: 'Geld ausgegeben (Finanzbuch folgt)' },
 ] as const
@@ -25,6 +26,7 @@ export const DEFAULT_DAY_SHEET: Record<DaySheetField, boolean> = {
   abstinence: true,
   mood: true,
   dream: true,
+  reading: true,
   notes: false,
   money: false,
 }

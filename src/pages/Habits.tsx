@@ -4,6 +4,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Habit } from '../db'
 import { WEEKDAYS, addMonths, fmtShort, monthGrid, todayKey, weekKeys } from '../lib/date'
 import { currentStreak } from '../lib/stats'
+import { weekId } from '../lib/rewards'
+import { DONE_GREEN } from '../lib/colors'
 import { DeleteHint, Sheet, TopBar, confirmDelete, useSwipe } from '../components/ui'
 import { IconCheck } from '../components/Icons'
 import { MonthNav } from './Calendar'
@@ -14,21 +16,44 @@ async function toggleHabit(habitId: number, date: string) {
   else await db.habitLogs.add({ habitId, date })
 }
 
-function HabitNameSheet({ habit, onClose }: { habit?: Habit; onClose: () => void }) {
+/** Weeks (ISO) in which the weekly target was reached. */
+function reachedWeeks(dates: Set<string>, target: number) {
+  const perWeek = new Map<string, number>()
+  dates.forEach((d) => perWeek.set(weekId(d), (perWeek.get(weekId(d)) ?? 0) + 1))
+  return new Set([...perWeek].filter(([, n]) => n >= target).map(([w]) => w))
+}
+
+function HabitSheet({ habit, onClose }: { habit?: Habit; onClose: () => void }) {
   const [name, setName] = useState(habit?.name ?? '')
+  const [description, setDescription] = useState(habit?.description ?? '')
+  const [target, setTarget] = useState(habit?.weeklyTarget ?? 7)
   const save = async () => {
     if (!name.trim()) return
-    if (habit) await db.habits.update(habit.id!, { name: name.trim() })
-    else await db.habits.add({ name: name.trim(), createdAt: todayKey(), order: Date.now() })
+    const data = { name: name.trim(), description: description.trim() || undefined, weeklyTarget: target }
+    if (habit) await db.habits.update(habit.id!, data)
+    else await db.habits.add({ ...data, createdAt: todayKey(), order: Date.now() })
     onClose()
   }
   return (
-    <Sheet title={habit ? 'Habit umbenennen' : 'Neues Habit'} onClose={onClose}>
-      <label className="field">
-        Bezeichnung
-        <input type="text" autoFocus value={name} placeholder="z. B. Zahnseide benutzt" onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && save()} />
-      </label>
+    <Sheet title={habit ? 'Habit bearbeiten' : 'Neues Habit'} onClose={onClose}>
+      <div className="stack">
+        <label className="field">
+          Bezeichnung
+          <input type="text" autoFocus={!habit} value={name} placeholder="z. B. Zahnseide benutzt" onChange={(e) => setName(e.target.value)} />
+        </label>
+        <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="small muted">Ziel pro Woche</span>
+          <div className="row" style={{ gap: 6 }}>
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+              <button key={n} type="button" className={`btn small grow ${target === n ? 'primary' : ''}`} style={{ padding: 0 }} onClick={() => setTarget(n)}>{n}×</button>
+            ))}
+          </div>
+        </div>
+        <label className="field">
+          Beschreibung – warum ist dieses Habit sinnvoll? (optional)
+          <textarea style={{ minHeight: 110 }} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </label>
+      </div>
       <div className="sheet-actions">
         <button className="btn ghost" onClick={onClose}>Abbrechen</button>
         <button className="btn primary" onClick={save} disabled={!name.trim()}>Speichern</button>
@@ -74,20 +99,25 @@ export function HabitList() {
         {data.habits.map((h) => {
           const dates = data.byHabit.get(h.id!) ?? new Set<string>()
           const doneToday = dates.has(today)
+          const target = h.weeklyTarget || 7
+          const thisWeek = week.filter((d) => dates.has(d)).length
+          const reached = thisWeek >= target
           return (
             <div key={h.id} className={`item habit-row ${deleteMode ? 'deletable' : ''}`}
               onClick={() => (deleteMode ? remove(h) : navigate(`/habits/${h.id}`))} role="button">
               <div style={{ minWidth: 0 }}>
                 <div className="title" style={{ wordBreak: 'break-word' }}>{h.name}</div>
-                <div className="row tiny muted" style={{ gap: 6, marginTop: 2 }}>
+                <div className="row tiny muted" style={{ gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
                   <span className="num">{fmtShort(h.createdAt)}</span>
                   <span className="habit-box num" title="gesamt / aktueller Streak">{dates.size} | {currentStreak(dates, today)}</span>
+                  <span className="num" style={{ color: reached ? DONE_GREEN : undefined }}>{thisWeek}/{target}</span>
                 </div>
               </div>
               <div className="habit-week">
                 {week.map((d) => (
                   <button key={d} aria-label={d} disabled={d > today || deleteMode}
                     className={`circle small-circle ${dates.has(d) ? 'on' : ''} ${d > today ? 'future' : ''} ${d === today ? 'today' : ''}`}
+                    style={dates.has(d) && reached ? { background: DONE_GREEN, borderColor: DONE_GREEN } : undefined}
                     onClick={(e) => { e.stopPropagation(); toggleHabit(h.id!, d) }} />
                 ))}
               </div>
@@ -100,7 +130,7 @@ export function HabitList() {
         })}
       </div>
       {!data.habits.length && <div className="empty">Noch keine Habits. Mit + anlegen.</div>}
-      {adding && <HabitNameSheet onClose={() => setAdding(false)} />}
+      {adding && <HabitSheet onClose={() => setAdding(false)} />}
     </div>
   )
 }
@@ -110,7 +140,7 @@ export function HabitDetail() {
   const habitId = Number(id)
   const today = todayKey()
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
-  const [renaming, setRenaming] = useState(false)
+  const [editing, setEditing] = useState(false)
   const swipe = useSwipe(() => setMonth((m) => addMonths(m, -1)), () => setMonth((m) => addMonths(m, 1)))
   const habit = useLiveQuery(() => db.habits.get(habitId), [habitId])
   const dates = useLiveQuery(async () => new Set((await db.habitLogs.where('habitId').equals(habitId).toArray()).map((l) => l.date)), [habitId]) ?? new Set<string>()
@@ -118,17 +148,21 @@ export function HabitDetail() {
   if (!habit) return <div className="page"><TopBar title="Habit" /></div>
   const monthPrefix = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`
   const inMonth = [...dates].filter((d) => d.startsWith(monthPrefix)).length
+  const target = habit.weeklyTarget || 7
+  const reached = reachedWeeks(dates, target)
 
   return (
     <div className="page">
       <TopBar title={habit.name}>
-        <button className="btn small ghost" onClick={() => setRenaming(true)}>Umbenennen</button>
+        <button className="btn small ghost" onClick={() => setEditing(true)}>Bearbeiten</button>
       </TopBar>
       <div className="row" style={{ gap: 8, marginBottom: 14 }}>
         <div className="card grow"><div className="tiny muted">Gesamt</div><div className="num" style={{ fontSize: 22 }}>{dates.size}</div></div>
         <div className="card grow"><div className="tiny muted">Streak</div><div className="num" style={{ fontSize: 22 }}>{currentStreak(dates, today)}</div></div>
-        <div className="card grow"><div className="tiny muted">Diesen Monat</div><div className="num" style={{ fontSize: 22 }}>{inMonth}</div></div>
+        <div className="card grow"><div className="tiny muted">Monat</div><div className="num" style={{ fontSize: 22 }}>{inMonth}</div></div>
+        <div className="card grow"><div className="tiny muted">Ziel</div><div className="num" style={{ fontSize: 22 }}>{target}×</div></div>
       </div>
+      {habit.description && <div className="card pre" style={{ marginBottom: 14 }}>{habit.description}</div>}
       <MonthNav month={month} onChange={setMonth} />
       <div {...swipe} style={{ touchAction: 'pan-y' }}>
         <div className="cal-head">{WEEKDAYS.map((w) => <div key={w}>{w}</div>)}</div>
@@ -137,7 +171,10 @@ export function HabitDetail() {
             d ? (
               <button key={d} disabled={d > today}
                 className={`cal-cell cal-mini num ${dates.has(d) ? 'filled' : ''} ${d === today ? 'today' : ''}`}
-                style={{ opacity: d > today ? 0.35 : 1 }}
+                style={{
+                  opacity: d > today ? 0.35 : 1,
+                  ...(dates.has(d) && reached.has(weekId(d)) ? { background: DONE_GREEN, borderColor: DONE_GREEN, color: '#000' } : {}),
+                }}
                 onClick={() => toggleHabit(habitId, d)}>
                 {Number(d.slice(8))}
               </button>
@@ -145,8 +182,10 @@ export function HabitDetail() {
           )}
         </div>
       </div>
-      <p className="tiny muted" style={{ marginTop: 10 }}>Eingetragen am {fmtShort(habit.createdAt)}. Tag antippen zum Nachtragen/Entfernen. Nach rechts wischen: vorheriger Monat.</p>
-      {renaming && <HabitNameSheet habit={habit} onClose={() => setRenaming(false)} />}
+      <p className="tiny muted" style={{ marginTop: 10 }}>
+        Eingetragen am {fmtShort(habit.createdAt)}. Grün = Wochenziel erreicht. Tag antippen zum Nachtragen/Entfernen. Nach rechts wischen: vorheriger Monat.
+      </p>
+      {editing && <HabitSheet habit={habit} onClose={() => setEditing(false)} />}
     </div>
   )
 }

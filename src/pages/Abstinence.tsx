@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type MonthImage, type Substance } from '../db'
-import { addMonths, fmtLong, fmtMonthYear, monthDayKeys, monthKey, shiftKey, todayKey } from '../lib/date'
+import { addMonths, daysBetween, fmtLong, fmtMonthYear, monthDayKeys, monthKey, shiftKey, todayKey } from '../lib/date'
 import { currentStreak, isCompleteDay, logKey } from '../lib/stats'
 import { MOSAIC_COLS, MOSAIC_ROWS, MOSAIC_TILES, ensureMonthImage, revealedTiles, rerollMonthImage } from '../lib/mosaic'
 import { TopBar, useSwipe } from '../components/ui'
+import { RECOVERY_DAYS, computeRelapses, daysToRecovery } from '../lib/relapse'
 import { IconCheck, IconChevronLeft, IconChevronRight, IconSettings, IconShuffle, SubstanceGlyph } from '../components/Icons'
 import { useBlobUrl } from '../components/Attachments'
 
@@ -87,8 +88,19 @@ export function AbstinencePage() {
     ensureMonthImage(mKey).then(setEntry)
   }, [mKey, imageCount, storedEntry?.imageId])
 
+  const [openReason, setOpenReason] = useState<number>()
   const substances = data?.substances ?? []
   const logs = data?.logs ?? new Set<string>()
+  // Running relapse phase per substance → abstinent days still needed to leave it.
+  const phaseBySubstance = new Map<number, number>()
+  let totalRelapses = 0
+  for (const s of substances) {
+    const confirmed = new Set([...logs].filter((k) => k.startsWith(`${s.id}|`)).map((k) => k.split('|')[1]))
+    const relapses = computeRelapses(s, confirmed, today)
+    totalRelapses += relapses.length
+    const running = relapses.find((r) => !r.phaseEnd)
+    if (running) phaseBySubstance.set(s.id!, daysToRecovery(running, confirmed, today))
+  }
   const activeOnDay = substances.filter((s) => s.startDate <= day)
   const completeDays = days.filter((d) => d <= today && isCompleteDay(substances, logs, d)).length
 
@@ -113,12 +125,25 @@ export function AbstinencePage() {
       <div className="list">
         {activeOnDay.map((s) => {
           const on = logs.has(logKey(s.id!, day))
+          const relapse = phaseBySubstance.get(s.id!)
           return (
-            <button key={s.id} className={`abst-btn ${on ? 'on' : ''}`} onClick={() => toggleAbstinence(s.id!, day)} aria-pressed={on}>
-              <SubstanceGlyph icon={s.icon} size={30} />
-              <span className="grow" style={{ textAlign: 'left' }}>{s.name}</span>
-              <span className="circle-big" style={on ? { background: 'var(--grad)', borderColor: 'transparent' } : undefined}>{on && <IconCheck />}</span>
-            </button>
+            <div key={s.id} className={`abst-btn ${on ? 'on' : ''}`}>
+              <div className="row" style={{ width: '100%', gap: 14 }}>
+                <SubstanceGlyph icon={s.icon} size={30} />
+                <button className="grow abst-name" onClick={() => setOpenReason(openReason === s.id ? undefined : s.id)} aria-expanded={openReason === s.id}>
+                  {s.name}
+                  {relapse && <span className="tiny" style={{ display: 'block', color: 'var(--rel-mid)' }}>Rückfallphase · noch {relapse} Tag{relapse === 1 ? '' : 'e'}</span>}
+                  {s.reason && <span className="tiny muted" style={{ display: 'block' }}>{openReason === s.id ? '▴ Warum' : '▾ Warum'}</span>}
+                </button>
+                <button className="circle-big" aria-label={`Frei von ${s.name} bestätigen`} aria-pressed={on} onClick={() => toggleAbstinence(s.id!, day)}
+                  style={on ? { background: 'var(--grad)', borderColor: 'transparent' } : undefined}>{on && <IconCheck />}</button>
+              </div>
+              {openReason === s.id && (
+                <div className="pre small" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)', fontWeight: 400 }}>
+                  {s.reason || <span className="muted">Noch kein Text. In den Einstellungen bei der Substanz eintragen.</span>}
+                </div>
+              )}
+            </div>
           )
         })}
         {substances.length > 0 && !activeOnDay.length && <div className="small muted">An diesem Tag lief noch kein Tracking.</div>}
@@ -165,6 +190,11 @@ export function AbstinencePage() {
           )
         })}
       </div>
+      {substances.length > 0 && (
+        <Link to="/abstinenz/rueckfaelle" className="btn" style={{ width: '100%', marginTop: 20 }}>
+          Rückfälle ansehen{totalRelapses ? ` (${totalRelapses})` : ''}
+        </Link>
+      )}
     </div>
   )
 }
@@ -206,6 +236,62 @@ export function SubstanceYear() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+export function RelapsesPage() {
+  const today = todayKey()
+  const data = useLiveQuery(async () => {
+    const [substances, logs] = await Promise.all([db.substances.orderBy('order').toArray(), db.abstinenceLogs.toArray()])
+    return substances.map((s) => {
+      const confirmed = new Set(logs.filter((l) => l.substanceId === s.id).map((l) => l.date))
+      const relapses = computeRelapses(s, confirmed, today)
+      const running = relapses.find((r) => !r.phaseEnd)
+      return { s, relapses: [...relapses].reverse(), remaining: running ? daysToRecovery(running, confirmed, today) : 0 }
+    })
+  }) ?? []
+
+  return (
+    <div className="page">
+      <TopBar title="Rückfälle" />
+      <p className="small muted" style={{ marginTop: 0 }}>
+        Jeder vergangene Tag ohne Bestätigung zählt als nicht abstinent. Ein Rückfall startet eine Rückfallphase, die nach
+        {` ${RECOVERY_DAYS} `}abstinenten Tagen in Folge endet. Vergessene Tage kannst du im Abstinenz-Bereich nachtragen.
+      </p>
+      {data.map(({ s, relapses, remaining }) => (
+        <div key={s.id} className="card" style={{ marginBottom: 14 }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <SubstanceGlyph icon={s.icon} />
+            <strong className="grow">{s.name}</strong>
+            <span className="tiny muted num">{relapses.length} Rückfall{relapses.length === 1 ? '' : 'e'}</span>
+          </div>
+          {remaining > 0 && (
+            <div className="small" style={{ color: 'var(--rel-mid)', marginBottom: 8 }}>
+              In der Rückfallphase – noch {remaining} abstinente{remaining === 1 ? 'r' : ''} Tag{remaining === 1 ? '' : 'e'} bis zum Ende.
+            </div>
+          )}
+          {!relapses.length && <div className="small muted">Kein Rückfall seit {fmtLong(s.startDate)}. 💪</div>}
+          <div className="list">
+            {relapses.map((r) => {
+              const duration = daysBetween(r.start, r.lastMiss) + 1
+              return (
+                <div key={r.start} className="item" style={{ minHeight: 0 }}>
+                  <span className="stripe" style={{ background: r.phaseEnd ? 'var(--faint)' : 'var(--rel-mid)' }} />
+                  <div className="grow">
+                    <div className="title num">{fmtLong(r.start)}{duration > 1 ? ` – ${fmtLong(r.lastMiss)}` : ''}</div>
+                    <div className="meta num">
+                      Dauer {duration} Tag{duration === 1 ? '' : 'e'}
+                      {r.missedDays !== duration ? ` (${r.missedDays} nicht abstinent)` : ''}
+                      {' · '}Rückfallphase {r.phaseEnd ? `bis ${fmtLong(r.phaseEnd)}` : 'läuft'} ({r.phaseDays} Tage)
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

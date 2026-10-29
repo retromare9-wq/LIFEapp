@@ -7,6 +7,29 @@ import { exportBackup, exportTextZip, importBackup } from '../lib/export'
 import { Sheet, TagInput, TopBar, confirmDelete } from '../components/ui'
 import { IconDownload, IconPlus, SUBSTANCE_ICONS, SubstanceGlyph } from '../components/Icons'
 import { useBlobUrl } from '../components/Attachments'
+import { DEFAULT_REWARDS, REWARD_RULES, SETTING_REWARDS, type RewardKey, type RewardValues } from '../lib/rewards'
+
+function RewardSettings() {
+  const stored = useSetting<Partial<RewardValues>>(SETTING_REWARDS, {})
+  const values = { ...DEFAULT_REWARDS, ...stored }
+  const update = (key: RewardKey, field: 'km' | 'credits', raw: string) =>
+    saveSetting(SETTING_REWARDS, { ...values, [key]: { ...values[key], [field]: Number(raw) || 0 } })
+  return (
+    <div className="card">
+      <div className="reward-row tiny muted"><span /><span>km</span><span>Credits</span></div>
+      {REWARD_RULES.map((r) => (
+        <div key={r.key} className="reward-row">
+          <span className="small">{r.label}</span>
+          <input type="number" inputMode="numeric" value={values[r.key].km} onChange={(e) => update(r.key, 'km', e.target.value)} />
+          <input type="number" inputMode="numeric" value={values[r.key].credits} onChange={(e) => update(r.key, 'credits', e.target.value)} />
+        </div>
+      ))}
+      <button className="btn ghost small" style={{ marginTop: 10 }} onClick={() => window.confirm('Alle Werte auf die Standardwerte zurücksetzen?') && saveSetting(SETTING_REWARDS, {})}>
+        Standardwerte wiederherstellen
+      </button>
+    </div>
+  )
+}
 
 /** Scales photos down before storing them, so the on-device database stays small. */
 async function downscale(file: File, max = 1600): Promise<Blob> {
@@ -23,7 +46,7 @@ function SubstanceSheet({ substance, onClose }: { substance?: Substance; onClose
   const [s, setS] = useState<Partial<Substance>>(substance ?? { name: '', icon: 'generic', startDate: todayKey() })
   const save = async () => {
     if (!s.name?.trim()) return
-    const data = { name: s.name.trim(), icon: s.icon ?? 'generic', startDate: s.startDate || todayKey() }
+    const data = { name: s.name.trim(), icon: s.icon ?? 'generic', startDate: s.startDate || todayKey(), reason: s.reason?.trim() || undefined }
     if (substance?.id != null) await db.substances.update(substance.id, data)
     else await db.substances.add({ ...data, order: Date.now() })
     onClose()
@@ -49,6 +72,9 @@ function SubstanceSheet({ substance, onClose }: { substance?: Substance; onClose
           </div>
         </div>
         <label className="field">Beginn der Abstinenz<input type="date" value={s.startDate ?? ''} onChange={(e) => setS({ ...s, startDate: e.target.value })} /></label>
+        <label className="field">Warum ich abstinent bleiben möchte – was es mir bringt (optional)
+          <textarea style={{ minHeight: 110 }} value={s.reason ?? ''} onChange={(e) => setS({ ...s, reason: e.target.value })} />
+        </label>
       </div>
       <div className="sheet-actions">
         {substance && <button className="btn danger" onClick={remove}>Löschen</button>}
@@ -167,6 +193,9 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      <div className="section-title">km & Credits – Werte</div>
+      <RewardSettings />
 
       <div className="section-title">Daten</div>
       <div className="card stack">
