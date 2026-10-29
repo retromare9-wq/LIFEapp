@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, nowIso, rememberTags, type Book, type BookStatus, type ReadingLog } from '../db'
 import { fmtShort, todayKey } from '../lib/date'
 import { DeleteHint, RewardToggle, Sheet, TagInput, TopBar, confirmDelete } from '../components/ui'
 import { IconPlus } from '../components/Icons'
+import { byOrder, currentPage, pageFromPercent, recomputeBook } from '../lib/reading'
 
 const STATUS_LABEL: Record<BookStatus, string> = { planned: 'Wunschliste', reading: 'lese ich gerade', finished: 'gelesen', dnf: 'abgebrochen (DNF)' }
 
@@ -24,15 +25,20 @@ export function Stars({ value, onChange, size = 26 }: { value?: number; onChange
 export function BookForm({ book, initial, onClose }: { book?: Book; initial?: Partial<Book>; onClose: (saved?: boolean) => void }) {
   const [b, setB] = useState<Partial<Book>>(book ?? { title: '', author: '', tags: [], status: 'reading', startDate: todayKey(), ...initial })
   const set = (patch: Partial<Book>) => setB((prev) => ({ ...prev, ...patch }))
+  const [start, setStart] = useState<{ page?: number; percent?: number }>({ page: book?.startPage })
+  const startPage = start.percent != null ? (b.totalPages ? Math.round((b.totalPages * start.percent) / 100) : undefined) : start.page
   const save = async () => {
     if (!b.title?.trim()) return
     const data = {
       title: b.title.trim(), author: b.author?.trim() ?? '', tags: b.tags ?? [], status: b.status ?? 'planned',
       startDate: b.startDate || undefined, endDate: b.endDate || undefined,
       totalPages: b.totalPages || undefined, rating: b.status === 'finished' ? b.rating : undefined, noReward: !!b.noReward,
+      startPage: startPage || undefined,
     }
-    if (book?.id != null) await db.books.update(book.id, data)
-    else await db.books.add({ ...data, createdAt: nowIso() })
+    if (book?.id != null) {
+      await db.books.update(book.id, data)
+      await recomputeBook(book.id)
+    } else await db.books.add({ ...data, createdAt: nowIso() })
     await rememberTags('book', data.tags)
     onClose(true)
   }
@@ -55,6 +61,7 @@ export function BookForm({ book, initial, onClose }: { book?: Book; initial?: Pa
         <label className="field">Seitenzahl des Buchs (optional)
           <input type="number" inputMode="numeric" min={1} value={b.totalPages ?? ''} onChange={(e) => set({ totalPages: Number(e.target.value) || undefined })} />
         </label>
+        <PositionInput label="Einstieg: schon gelesen bis … (optional)" totalPages={b.totalPages} value={start} onChange={setStart} />
         <div className="row">
           <label className="field grow">Lesebeginn (optional)<input type="date" value={b.startDate ?? ''} onChange={(e) => set({ startDate: e.target.value || undefined })} /></label>
           <label className="field grow">Beendet am (optional)<input type="date" value={b.endDate ?? ''} onChange={(e) => set({ endDate: e.target.value || undefined })} /></label>
@@ -75,41 +82,144 @@ export function BookForm({ book, initial, onClose }: { book?: Book; initial?: Pa
   )
 }
 
-function ReadingLogForm({ book, log, onClose }: { book: Book; log?: ReadingLog; onClose: () => void }) {
-  const [l, setL] = useState<Partial<ReadingLog>>(log ?? { date: todayKey() })
+type PositionMode = 'page' | 'percent'
+
+/** Page or percentage (e-books); percent needs the book's page count to be converted. */
+export function PositionInput({ label, totalPages, value, onChange, extraMode }: {
+  label: string
+  totalPages?: number
+  value: { page?: number; percent?: number }
+  onChange: (v: { page?: number; percent?: number }) => void
+  extraMode?: { label: string; active: boolean; onSelect: () => void }
+}) {
+  const [mode, setMode] = useState<PositionMode>(value.percent != null ? 'percent' : 'page')
+  const active = extraMode?.active ? null : mode
+  const shown = mode === 'percent' ? value.percent : value.page
+  return (
+    <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="small muted">{label}</span>
+      <div className="row" style={{ gap: 6 }}>
+        <button type="button" className={`btn small grow ${active === 'page' ? 'primary' : ''}`} onClick={() => { setMode('page'); onChange({ page: value.page }) }}>Seite</button>
+        <button type="button" className={`btn small grow ${active === 'percent' ? 'primary' : ''}`} onClick={() => { setMode('percent'); onChange({ percent: value.percent }) }}>Prozent</button>
+        {extraMode && <button type="button" className={`btn small grow ${extraMode.active ? 'primary' : ''}`} onClick={extraMode.onSelect}>{extraMode.label}</button>}
+      </div>
+      {!extraMode?.active && (
+        <div className="row">
+          <input type="number" inputMode="decimal" min={0} max={mode === 'percent' ? 100 : undefined} value={shown ?? ''}
+            placeholder={mode === 'percent' ? 'z. B. 37' : 'z. B. 120'}
+            onChange={(e) => {
+              const n = e.target.value === '' ? undefined : Number(e.target.value)
+              onChange(mode === 'percent' ? { percent: n } : { page: n })
+            }} />
+          <span className="muted">{mode === 'percent' ? '%' : totalPages ? `von ${totalPages}` : ''}</span>
+        </div>
+      )}
+      {!extraMode?.active && mode === 'percent' && !totalPages && (
+        <span className="tiny" style={{ color: 'var(--rel-mid)' }}>Für Prozent bitte beim Buch die Seitenzahl eintragen (Bearbeiten).</span>
+      )}
+    </div>
+  )
+}
+
+export function ReadingLogForm({ book, log, initialDate, onClose }: { book: Book; log?: ReadingLog; initialDate?: string; onClose: (saved?: boolean) => void }) {
+  const [date, setDate] = useState(log?.date ?? initialDate ?? todayKey())
+  const [thoughts, setThoughts] = useState(log?.thoughts ?? '')
+  const [countMode, setCountMode] = useState(log != null && log.position == null && log.pages > 0)
+  const [pages, setPages] = useState<number | undefined>(log?.position == null ? log?.pages || undefined : undefined)
+  const [pos, setPos] = useState<{ page?: number; percent?: number }>(
+    log?.percent != null ? { percent: log.percent } : { page: log?.position },
+  )
+  const logs = useLiveQuery(() => db.readingLogs.where('bookId').equals(book.id!).toArray(), [book.id]) ?? []
+
+  // Position before this session: everything ordered before it (a new entry goes last on its day).
+  const others = logs.filter((l) => l.id !== log?.id)
+  const before = others.filter((l) => byOrder(l, { ...(log ?? { createdAt: '\uffff' }), date } as ReadingLog) < 0)
+  const prev = currentPage(book, before)
+  const position = pos.percent != null ? pageFromPercent(book, pos.percent) : pos.page
+  const read = countMode ? pages ?? 0 : position != null ? Math.max(0, position - prev) : 0
+  const canSave = (countMode ? !!pages : position != null) || !!thoughts.trim()
+
   const save = async () => {
-    if (!l.pages && !l.thoughts?.trim()) return
-    const data = { bookId: book.id!, date: l.date || todayKey(), pages: l.pages ?? 0, thoughts: l.thoughts?.trim() || undefined }
+    if (!canSave) return
+    const data = {
+      bookId: book.id!, date, thoughts: thoughts.trim() || undefined,
+      pages: read,
+      position: countMode ? undefined : position,
+      percent: countMode ? undefined : pos.percent,
+    }
     if (log?.id != null) await db.readingLogs.update(log.id, data)
     else await db.readingLogs.add({ ...data, createdAt: nowIso() })
+    await recomputeBook(book.id!)
     // Reading a wish-list book starts it.
-    if (book.status === 'planned') await db.books.update(book.id!, { status: 'reading', startDate: book.startDate ?? data.date })
-    onClose()
+    if (book.status === 'planned') await db.books.update(book.id!, { status: 'reading', startDate: book.startDate ?? date })
+    onClose(true)
   }
   const remove = async () => {
     if (log?.id == null || !confirmDelete('Leseeintrag')) return
     await db.readingLogs.delete(log.id)
+    await recomputeBook(book.id!)
     onClose()
   }
   return (
-    <Sheet title={log ? 'Leseeintrag bearbeiten' : 'Gelesen'} onClose={onClose}>
+    <Sheet title={log ? 'Leseeintrag bearbeiten' : `Gelesen: ${book.title}`} onClose={onClose}>
       <div className="stack">
-        <div className="row">
-          <label className="field grow">Datum<input type="date" value={l.date ?? ''} onChange={(e) => setL({ ...l, date: e.target.value })} /></label>
-          <label className="field" style={{ width: 130 }}>Seiten
-            <input type="number" inputMode="numeric" min={0} autoFocus value={l.pages ?? ''} onChange={(e) => setL({ ...l, pages: Number(e.target.value) || undefined })} />
+        <label className="field">Datum<input type="date" value={date} onChange={(e) => setDate(e.target.value || todayKey())} /></label>
+        <PositionInput label={`Wo bist du jetzt? (bisher: Seite ${prev}${book.totalPages ? ` von ${book.totalPages}` : ''})`}
+          totalPages={book.totalPages} value={pos} onChange={(v) => { setCountMode(false); setPos(v) }}
+          extraMode={{ label: 'Anzahl Seiten', active: countMode, onSelect: () => setCountMode(true) }} />
+        {countMode && (
+          <label className="field">Gelesene Seiten
+            <input type="number" inputMode="numeric" min={0} autoFocus value={pages ?? ''} onChange={(e) => setPages(Number(e.target.value) || undefined)} />
           </label>
-        </div>
+        )}
+        {!countMode && position != null && (
+          <div className="small" style={{ color: position < prev ? 'var(--rel-mid)' : 'var(--mood-5)' }}>
+            {position < prev ? `Seite ${position} liegt vor der bisherigen Seite ${prev} – es werden 0 Seiten gezählt.` : `= ${read} Seiten gelesen`}
+          </div>
+        )}
         <label className="field">Gedanken (optional)
-          <textarea style={{ minHeight: 120 }} value={l.thoughts ?? ''} onChange={(e) => setL({ ...l, thoughts: e.target.value })} />
+          <textarea style={{ minHeight: 110 }} value={thoughts} onChange={(e) => setThoughts(e.target.value)} />
         </label>
       </div>
       <div className="sheet-actions">
         {log && <button className="btn danger" onClick={remove}>Löschen</button>}
-        <button className="btn ghost" onClick={onClose}>Abbrechen</button>
-        <button className="btn primary" onClick={save} disabled={!l.pages && !l.thoughts?.trim()}>Speichern</button>
+        <button className="btn ghost" onClick={() => onClose()}>Abbrechen</button>
+        <button className="btn primary" onClick={save} disabled={!canSave}>Speichern</button>
       </div>
     </Sheet>
+  )
+}
+
+/** Entry point from a "Lesen" activity/to-do: pick the book, then log the progress. */
+export function ReadingEntry() {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const date = params.get('date') ?? todayKey()
+  const books = useLiveQuery(() => db.books.filter((b) => b.status === 'reading' || b.status === 'planned').toArray())
+  const [picked, setPicked] = useState<Book>()
+  const reading = (books ?? []).filter((b) => b.status === 'reading')
+  const planned = (books ?? []).filter((b) => b.status === 'planned')
+  const [adding, setAdding] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
+  // With exactly one book in progress the form opens right away.
+  const chosen = picked ?? (reading.length === 1 && !adding && !dismissed ? reading[0] : undefined)
+  const pickBtn = (b: Book) => (
+    <button key={b.id} className="item" onClick={() => setPicked(b)}>
+      <div className="grow">{b.author && <div className="meta">{b.author}</div>}<div className="title">{b.title}</div></div>
+    </button>
+  )
+  return (
+    <div className="page">
+      <TopBar title="Was hast du gelesen?" />
+      <div className="section-title">Lese ich gerade</div>
+      <div className="list">{reading.map(pickBtn)}</div>
+      {books && !reading.length && <div className="small muted">Kein Buch in Arbeit.</div>}
+      {planned.length > 0 && <div className="section-title">Von der Wunschliste beginnen</div>}
+      <div className="list">{planned.map(pickBtn)}</div>
+      <button className="btn ghost" style={{ width: '100%', marginTop: 14 }} onClick={() => setAdding(true)}><IconPlus /> Neues Buch</button>
+      {chosen && !adding && <ReadingLogForm book={chosen} initialDate={date} onClose={(saved) => { if (saved) navigate(-1); else { setPicked(undefined); setDismissed(true) } }} />}
+      {adding && <BookForm onClose={() => setAdding(false)} />}
+    </div>
   )
 }
 
@@ -121,7 +231,7 @@ function usePagesByBook() {
   }) ?? new Map<number, number>()
 }
 
-function BookItem({ b, pages, deleteMode }: { b: Book; pages: number; deleteMode?: boolean }) {
+function BookItem({ b, pages, deleteMode, onLog }: { b: Book; pages: number; deleteMode?: boolean; onLog?: () => void }) {
   const navigate = useNavigate()
   const click = async () => {
     if (!deleteMode) return navigate(`/lesen/${b.id}`)
@@ -138,11 +248,15 @@ function BookItem({ b, pages, deleteMode }: { b: Book; pages: number; deleteMode
         <div className="meta">
           {b.status === 'reading' && b.startDate && <span className="num">seit {fmtShort(b.startDate)} · </span>}
           {(b.status === 'finished' || b.status === 'dnf') && b.endDate && <span className="num">{b.status === 'dnf' ? 'DNF ' : ''}{fmtShort(b.endDate)} · </span>}
-          {pages > 0 && <span className="num">{pages}{b.totalPages ? ` / ${b.totalPages}` : ''} Seiten</span>}
+          {pages > 0 && <span className="num">{pages} Seiten gelesen</span>}
+          {b.status === 'reading' && b.totalPages ? <span className="num">{pages > 0 ? ' · ' : ''}S. {(b.startPage ?? 0) + pages}/{b.totalPages}</span> : null}
           {b.tags.length > 0 && <span> · {b.tags.map((t) => `#${t}`).join(' ')}</span>}
         </div>
         {b.status === 'finished' && b.rating && <Stars value={b.rating} size={16} />}
       </div>
+      {onLog && !deleteMode && (
+        <button className="icon-btn" aria-label="Lesefortschritt eintragen" onClick={(e) => { e.stopPropagation(); onLog() }}><IconPlus /></button>
+      )}
     </div>
   )
 }
@@ -150,6 +264,7 @@ function BookItem({ b, pages, deleteMode }: { b: Book; pages: number; deleteMode
 export function BooksPage() {
   const [adding, setAdding] = useState(false)
   const [deleteMode, setDeleteMode] = useState(false)
+  const [logging, setLogging] = useState<Book>()
   const books = useLiveQuery(() => db.books.toArray()) ?? []
   const pages = usePagesByBook()
   const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''))
@@ -162,12 +277,13 @@ export function BooksPage() {
       <DeleteHint active={deleteMode} />
       <Link to="/lesen/gelesen" className="btn ghost small" style={{ marginBottom: 12 }}>Gelesene Bücher ({doneCount}) →</Link>
       <div className="section-title">Lese ich gerade</div>
-      <div className="list">{reading.map((b) => <BookItem key={b.id} b={b} pages={pages.get(b.id!) ?? 0} deleteMode={deleteMode} />)}</div>
+      <div className="list">{reading.map((b) => <BookItem key={b.id} b={b} pages={pages.get(b.id!) ?? 0} deleteMode={deleteMode} onLog={() => setLogging(b)} />)}</div>
       {!reading.length && <div className="small muted">Gerade kein Buch in Arbeit.</div>}
       <div className="section-title">Wunschliste</div>
       <div className="list">{planned.map((b) => <BookItem key={b.id} b={b} pages={pages.get(b.id!) ?? 0} deleteMode={deleteMode} />)}</div>
       {!planned.length && <div className="small muted">Noch nichts auf der Wunschliste.</div>}
       {adding && <BookForm onClose={() => setAdding(false)} />}
+      {logging && <ReadingLogForm book={logging} onClose={() => setLogging(undefined)} />}
     </div>
   )
 }
@@ -197,6 +313,7 @@ export function BookDetail() {
   if (!book) return <div className="page"><TopBar title="Buch" /></div>
 
   const total = logs.reduce((s, l) => s + (l.pages || 0), 0)
+  const page = currentPage(book, logs)
   const sorted = [...logs].sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`))
   const today = todayKey()
   const finish = async () => {
@@ -220,11 +337,16 @@ export function BookDetail() {
           {book.endDate && ` · Ende ${fmtShort(book.endDate)}`}
         </div>
         {book.tags.length > 0 && <div className="chips">{book.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
-        <div className="row" style={{ gap: 8 }}>
-          <span className="num" style={{ fontSize: 22 }}>{total}</span>
-          <span className="muted small">{book.totalPages ? `von ${book.totalPages} Seiten` : 'Seiten gelesen'}</span>
+        <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+          <span className="muted small">Seite</span>
+          <span className="num" style={{ fontSize: 22 }}>{page}</span>
+          {book.totalPages ? <span className="muted small">von {book.totalPages} ({Math.round((100 * page) / book.totalPages)} %)</span> : null}
         </div>
-        {book.totalPages ? <div className="progress"><div style={{ width: `${Math.min(100, (100 * total) / book.totalPages)}%` }} /></div> : null}
+        {book.totalPages ? <div className="progress"><div style={{ width: `${Math.min(100, (100 * page) / book.totalPages)}%` }} /></div> : null}
+        <div className="small muted num">{total} Seiten in der App erfasst{book.startPage ? ` · Einstieg bei Seite ${book.startPage}` : ''}</div>
+        {(book.status === 'reading' || book.status === 'planned') && (
+          <button className="btn primary" onClick={() => setLogForm('new')}><IconPlus /> Lesefortschritt eintragen</button>
+        )}
         {book.status === 'finished' && <Stars value={book.rating} onChange={(r) => db.books.update(bookId, { rating: r })} />}
         <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
           {book.status === 'planned' && <button className="btn small primary" onClick={() => db.books.update(bookId, { status: 'reading', startDate: book.startDate ?? today })}>Lesen beginnen</button>}
@@ -242,7 +364,10 @@ export function BookDetail() {
         {sorted.map((l) => (
           <div key={l.id} className="item" role="button" onClick={() => setLogForm(l)} style={{ alignItems: 'flex-start' }}>
             <div className="grow">
-              <div className="meta num">{fmtShort(l.date)}{l.pages ? ` · ${l.pages} Seiten` : ''}</div>
+              <div className="meta num">
+                {fmtShort(l.date)}{l.pages ? ` · ${l.pages} Seiten` : ''}
+                {l.percent != null ? ` · bis ${l.percent} %` : l.position != null ? ` · bis Seite ${l.position}` : ''}
+              </div>
               {l.thoughts && <div className="pre">{l.thoughts}</div>}
             </div>
           </div>

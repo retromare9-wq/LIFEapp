@@ -5,6 +5,8 @@ import { ColorPicker, DurationInput, ProjectSelect, RewardToggle, Sheet, confirm
 import { IconX } from '../components/Icons'
 import { KIND_LABEL } from '../lib/todo'
 import { todayKey } from '../lib/date'
+import { isReadingTitle } from '../lib/reading'
+import { useNavigate } from 'react-router-dom'
 
 export const RELEVANCE: { value: Relevance; label: string }[] = [
   { value: 'low', label: 'banal' },
@@ -169,6 +171,10 @@ export function useTodoCompletion() {
   const [pending, setPending] = useState<Todo>()
   const [duration, setDuration] = useState<number>()
   const today = todayKey()
+  const navigate = useNavigate()
+  const afterDone = (todo: Todo) => {
+    if (isReadingTitle(todo.title)) navigate(`/lesen/eintragen?date=${today}`)
+  }
 
   const toggle = (todo: Todo) => {
     if (!todo.done && todo.logAsActivity) {
@@ -176,11 +182,15 @@ export function useTodoCompletion() {
       setPending(todo)
     } else {
       setTodoDone(todo, !todo.done, today)
+      if (!todo.done) afterDone(todo)
     }
   }
   const finish = async (withDuration: boolean) => {
-    if (pending) await setTodoDone(pending, true, today, withDuration ? duration : undefined)
+    const todo = pending
     setPending(undefined)
+    if (!todo) return
+    await setTodoDone(todo, true, today, withDuration ? duration : undefined)
+    afterDone(todo)
   }
 
   const sheet = pending ? (

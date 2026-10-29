@@ -9,7 +9,7 @@ import { DreamsPage, MoodMonth, MoodsPage, NotesPage } from './pages/Journals'
 import { ProjectArchive, ProjectDetail, ProjectList } from './pages/Projects'
 import Settings from './pages/Settings'
 import Points from './pages/Points'
-import { BookDetail, BooksFinished, BooksPage } from './pages/Books'
+import { BookDetail, BooksFinished, BooksPage, ReadingEntry } from './pages/Books'
 import { HomeButton } from './components/ui'
 
 function HomeButtonOutsideHome() {
@@ -33,6 +33,7 @@ export default function App() {
         <Route path="/abstinenz/rueckfaelle" element={<RelapsesPage />} />
         <Route path="/lesen" element={<BooksPage />} />
         <Route path="/lesen/gelesen" element={<BooksFinished />} />
+        <Route path="/lesen/eintragen" element={<ReadingEntry />} />
         <Route path="/lesen/:id" element={<BookDetail />} />
         <Route path="/punkte" element={<Points />} />
         <Route path="/notizen" element={<NotesPage />} />

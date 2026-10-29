@@ -179,6 +179,8 @@ export interface Book {
   startDate?: string
   endDate?: string
   totalPages?: number
+  /** page already reached when the book was added (not counted as read in the app) */
+  startPage?: number
   /** 1–5, only for finished books */
   rating?: number
   noReward?: boolean
@@ -189,7 +191,12 @@ export interface ReadingLog {
   id?: number
   bookId: number
   date: string
+  /** pages read in this session (derived from position when that is set) */
   pages: number
+  /** page reached after this session */
+  position?: number
+  /** progress in % if it was entered that way (e-books) */
+  percent?: number
   thoughts?: string
   createdAt: string
 }

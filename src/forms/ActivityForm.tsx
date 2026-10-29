@@ -3,9 +3,12 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, nowIso, type Activity } from '../db'
 import { DurationInput, ProjectSelect, RewardToggle, Sheet, confirmDelete } from '../components/ui'
 import { todayKey } from '../lib/date'
+import { isReadingTitle } from '../lib/reading'
+import { useNavigate } from 'react-router-dom'
 
 export function ActivityForm({ activity, initial, onClose }: { activity?: Activity; initial?: Partial<Activity>; onClose: (saved?: boolean) => void }) {
   const today = todayKey()
+  const navigate = useNavigate()
   const [a, setA] = useState<Partial<Activity>>(activity ?? { title: '', ...initial })
   const set = (patch: Partial<Activity>) => setA((prev) => ({ ...prev, ...patch }))
   const names = useLiveQuery(async () => (await db.activities.orderBy('title').uniqueKeys()) as string[]) ?? []
@@ -31,6 +34,8 @@ export function ActivityForm({ activity, initial, onClose }: { activity?: Activi
     if (activity?.id != null) await db.activities.update(activity.id, data)
     else await db.activities.add({ ...data, createdAt: nowIso() })
     onClose(true)
+    // A new reading session leads straight to the reading log of the book.
+    if (!activity && isReadingTitle(data.title) && date <= today) navigate(`/lesen/eintragen?date=${date}`)
   }
 
   const remove = async () => {
