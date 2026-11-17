@@ -11,11 +11,14 @@ export const lastDay = (t: Todo) => (t.kind === 'event' && t.endDate && t.date &
 /** Whether a dated to-do shows up on `day` (multi-day events on every day of their span). */
 export const coversDay = (t: Todo, day: string) => !!t.date && t.date <= day && lastDay(t)! >= day
 
-/** Done appointments, events and to-dos that became activities turn green; other done to-dos are struck through. */
-const turnsGreen = (t: Todo) => t.kind !== 'todo' || t.logAsActivity
+/**
+ * Done appointments and to-dos that became activities turn green; events keep their own colour;
+ * other done to-dos are struck through.
+ */
+const turnsGreen = (t: Todo) => t.kind === 'appointment' || (t.kind === 'todo' && t.logAsActivity)
 
 export function doneStyle(t: Todo): { className: string; style: CSSProperties } {
-  if (!t.done) return { className: '', style: {} }
+  if (!t.done || t.kind === 'event') return { className: '', style: {} }
   if (!turnsGreen(t)) return { className: 'done-text', style: {} }
   return { className: '', style: { color: DONE_GREEN } }
 }
