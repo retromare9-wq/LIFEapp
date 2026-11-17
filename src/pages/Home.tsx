@@ -48,7 +48,7 @@ export default function Home() {
 
   const columns = useLiveQuery(async () => {
     const [todos, activities] = await Promise.all([
-      db.todos.where('date').belowOrEqual(days[2]).filter((t) => coversDay(t, days[0]) || coversDay(t, days[1]) || coversDay(t, days[2])).toArray(),
+      db.todos.filter((t) => coversDay(t, days[0]) || coversDay(t, days[1]) || coversDay(t, days[2])).toArray(),
       db.activities.where('date').between(days[0], days[2], true, true).toArray(),
     ])
     return days.map((d) =>

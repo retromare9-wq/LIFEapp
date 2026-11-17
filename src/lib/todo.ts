@@ -1,15 +1,21 @@
 import type { CSSProperties } from 'react'
 import type { Todo, TodoKind } from '../db'
 import { DONE_GREEN, colorValue } from './colors'
-import { fmtDayMonth, fmtDuration, fmtShort } from './date'
+import { fmtDayMonth, fmtDuration, fmtShort, toKey } from './date'
 
 export const KIND_LABEL: Record<TodoKind, string> = { todo: 'To-Do', appointment: 'Termin', event: 'Event' }
 export const KIND_MARK: Record<TodoKind, string> = { todo: '', appointment: '◆ ', event: '▰ ' }
 
 export const lastDay = (t: Todo) => (t.kind === 'event' && t.endDate && t.date && t.endDate > t.date ? t.endDate : t.date)
 
-/** Whether a dated to-do shows up on `day` (multi-day events on every day of their span). */
-export const coversDay = (t: Todo, day: string) => !!t.date && t.date <= day && lastDay(t)! >= day
+/**
+ * Whether a to-do shows up in the calendar on `day`. A completed plain to-do sits on the day it was
+ * actually done; appointments and events stay on their dates (multi-day events on every day of their span).
+ */
+export function coversDay(t: Todo, day: string) {
+  if (t.kind === 'todo' && t.done && t.doneAt) return toKey(new Date(t.doneAt)) === day
+  return !!t.date && t.date <= day && lastDay(t)! >= day
+}
 
 /**
  * Done to-dos that became activities turn green; appointments and events keep their own colour;
@@ -52,6 +58,8 @@ export function todoWhen(t: Todo) {
 
 /** Time label inside a day column for `day`. */
 export function timeOnDay(t: Todo, day: string) {
+  // A to-do completed on another day than planned: its planned time says nothing about that day.
+  if (t.kind === 'todo' && t.done && t.doneAt && toKey(new Date(t.doneAt)) !== t.date) return undefined
   const end = lastDay(t)
   if (end && end !== t.date) {
     if (day === t.date) return t.time ? `ab ${t.time}` : undefined

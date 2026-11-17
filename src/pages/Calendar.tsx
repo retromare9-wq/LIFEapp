@@ -26,7 +26,7 @@ export function MonthNav({ month, onChange }: { month: Date; onChange: (d: Date)
 
 /** All dated to-dos that touch the range [first, last] (multi-day events included). */
 const todosInRange = (first: string, last: string) =>
-  db.todos.where('date').belowOrEqual(last).filter((t) => {
+  db.todos.filter((t) => {
     for (let d = first; d <= last; d = shiftKey(d, 1)) if (coversDay(t, d)) return true
     return false
   }).toArray()
