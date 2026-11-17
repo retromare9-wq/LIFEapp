@@ -147,9 +147,9 @@ export function TodoList() {
   }
 
   const tabs = [
+    { key: 'undated', label: 'O.T' },
     ...week.map((d, i) => ({ key: d, label: i === 0 ? 'Heute' : i === 1 ? 'Morgen' : `${fmtWeekdayShort(d)} ${fmtDayMonth(d)}` })),
     { key: 'later', label: 'Später' },
-    { key: 'undated', label: 'Ohne Termin' },
   ]
 
   return (
@@ -157,7 +157,8 @@ export function TodoList() {
       <TopBar title="To-Dos" onAdd={() => setEditing('new')} deleteMode={deleteMode} onToggleDelete={() => setDeleteMode(!deleteMode)} />
       <div className="tabs">
         {tabs.map((t) => (
-          <button key={t.key} className={`tab ${tab === t.key ? 'on' : ''}`} onClick={() => setTab(t.key)}>
+          <button key={t.key} className={`tab ${tab === t.key ? 'on' : ''}`} onClick={() => setTab(t.key)}
+            title={t.key === 'undated' ? 'Ohne Termin' : undefined}>
             {t.label}{counts[t.key] ? <span className="tab-count num">{counts[t.key]}</span> : null}
           </button>
         ))}
