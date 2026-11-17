@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Activity, type Todo } from '../db'
 import { fmtDayMonth, fmtLong, fmtWeekdayShort, shiftKey, todayKey } from '../lib/date'
 import { computeRewards } from '../lib/rewards'
+import { DONE_GREEN } from '../lib/colors'
 import { KIND_MARK, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
 import { useSwipe } from '../components/ui'
 import { IconSettings } from '../components/Icons'
@@ -112,7 +113,7 @@ export default function Home() {
             {columns[i].map((c) => {
               if (c.kind === 'activity') {
                 return (
-                  <div key={`a${c.item.id}`} className="col-item is-activity">
+                  <div key={`a${c.item.id}`} className="col-item is-activity" style={d <= today ? { '--rel': DONE_GREEN, color: DONE_GREEN } as React.CSSProperties : undefined}>
                     {c.time && <span className="num col-time">{c.time}</span>}
                     {c.item.title}
                   </div>

@@ -357,3 +357,31 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; 
 .reward-row { display: grid; grid-template-columns: 1fr 72px 72px; gap: 6px; align-items: center; padding: 3px 0; }
 .reward-row input { min-height: 38px; padding: 6px 8px; text-align: right; }
 .score-big { font-size: 28px; font-weight: 600; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ---------- to-do tabs ---------- */
+.tabs {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  margin: 0 calc(-1 * var(--gutter)) 12px; padding: 2px var(--gutter) 4px;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 999px; font-size: 14px; white-space: nowrap;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted);
+}
+.tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tab-count { font-size: 11px; background: rgba(255, 255, 255, .15); border-radius: 99px; padding: 0 6px; }
+.budget-line {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px;
+  padding: 8px 12px; margin-bottom: 12px; border-radius: 10px;
+  border: 1px dashed var(--line-strong); color: var(--text);
+}
+.event-box {
+  margin-bottom: 14px; padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--violet); background: linear-gradient(180deg, rgba(138, 61, 255, .12), transparent);
+}
+.day-divider {
+  display: flex; align-items: center; gap: 10px; margin: 18px 0 8px;
+  font-size: 13px; color: var(--muted);
+}
+.day-divider::after { content: ''; flex: 1; height: 1px; background: var(--line-strong); }
