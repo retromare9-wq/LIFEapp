@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
+import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, setTodoDone, type Todo } from '../db'
 import { fmtDayMonth, fmtDuration, fmtShort, fmtWeekdayShort, shiftKey, toKey, todayKey } from '../lib/date'
-import { KIND_MARK, budgetSummary, coversDay, doneStyle, lastDay, timeOnDay, todoColor, todoWhen } from '../lib/todo'
+import { KIND_MARK, doneMark, budgetSummary, coversDay, doneStyle, lastDay, timeOnDay, todoColor, todoWhen } from '../lib/todo'
 import { Checkbox, DeleteHint, TopBar, confirmDelete, useProjectNames } from '../components/ui'
 import { TodoForm, useTodoCompletion } from '../forms/TodoForm'
 
@@ -22,8 +23,10 @@ function Checklist({ t }: { t: Todo }) {
   )
 }
 
-export function TodoItem({ t, deleteMode, onEdit, onToggle, projectName }: {
+export function TodoItem({ t, deleteMode, onEdit, onToggle, projectName, showDoneAt }: {
   t: Todo; deleteMode?: boolean; onEdit: () => void; onToggle?: (t: Todo) => void; projectName?: string
+  /** Show when it was actually completed (done list) instead of the planned date. */
+  showDoneAt?: boolean
 }) {
   const today = todayKey()
   const [open, setOpen] = useState(false)
@@ -37,12 +40,15 @@ export function TodoItem({ t, deleteMode, onEdit, onToggle, projectName }: {
       await db.todos.delete(t.id!)
     }
   }
-  const when = todoWhen(t)
+  const doneAt = t.doneAt ? new Date(t.doneAt) : undefined
+  const when = showDoneAt && doneAt
+    ? `erledigt ${fmtShort(toKey(doneAt))}, ${format(doneAt, 'HH:mm')}${t.date && t.date !== toKey(doneAt) ? ` · geplant ${fmtShort(t.date)}` : ''}`
+    : todoWhen(t)
   return (
     <div className={`item ${deleteMode ? 'deletable' : ''}`} onClick={click} role="button" style={{ alignItems: 'flex-start' }}>
       <span className="stripe" style={{ background: todoColor(t) }} />
       <div className="grow">
-        <div className={`title ${done.className}`} style={done.style}>{KIND_MARK[t.kind]}{t.title}</div>
+        <div className={`title ${done.className}`} style={done.style}>{KIND_MARK[t.kind]}{t.title}{doneMark(t)}</div>
         <div className="meta">
           {when && <span className="num" style={{ color: overdue ? 'var(--red)' : undefined }}>{when}</span>}
           {when && projectName && ' · '}
@@ -193,7 +199,7 @@ export function TodosDone() {
           return (
             <div key={t.id}>
               {header && <div className="section-title num" style={{ marginTop: 14 }}>{header}</div>}
-              <TodoItem t={t} onEdit={() => {}} onToggle={() => setTodoDone(t, false, today)} />
+              <TodoItem t={t} showDoneAt onEdit={() => {}} onToggle={() => setTodoDone(t, false, today)} />
             </div>
           )
         })}

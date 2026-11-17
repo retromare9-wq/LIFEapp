@@ -310,7 +310,8 @@ export async function setTodoDone(todo: Todo, done: boolean, today: string, dura
       if (todo.logAsActivity && activityId == null) {
         activityId = await db.activities.add({
           title: todo.title,
-          date: todo.date && todo.date < today ? todo.date : today,
+          // The activity happened when the to-do was actually completed, not when it was planned.
+          date: today,
           timeFrom: todo.time,
           timeTo: todo.timeTo,
           durationMinutes,

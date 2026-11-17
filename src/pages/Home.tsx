@@ -5,7 +5,7 @@ import { db, type Activity, type Todo } from '../db'
 import { fmtDayMonth, fmtLong, fmtWeekdayShort, shiftKey, todayKey } from '../lib/date'
 import { computeRewards } from '../lib/rewards'
 import { DONE_GREEN } from '../lib/colors'
-import { KIND_MARK, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
+import { KIND_MARK, doneMark, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
 import { useSwipe } from '../components/ui'
 import { IconSettings } from '../components/Icons'
 import { TodoForm } from '../forms/TodoForm'
@@ -124,7 +124,7 @@ export default function Home() {
               return (
                 <div key={`t${t.id}`} className={`col-item ${done.className}`} style={{ '--rel': todoColor(t), ...done.style } as React.CSSProperties}>
                   {c.time && <span className="num col-time">{c.time}</span>}
-                  {KIND_MARK[t.kind]}{t.title}
+                  {KIND_MARK[t.kind]}{t.title}{doneMark(t)}
                 </div>
               )
             })}

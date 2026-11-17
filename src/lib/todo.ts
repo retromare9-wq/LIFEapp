@@ -23,6 +23,9 @@ export function doneStyle(t: Todo): { className: string; style: CSSProperties } 
   return { className: '', style: { color: DONE_GREEN } }
 }
 
+/** Done appointments and events keep their colour, so they get a check mark instead. */
+export const doneMark = (t: Todo) => (t.done && t.kind !== 'todo' ? ' ✓' : '')
+
 export const todoColor = (t: Todo) => (t.done && turnsGreen(t) ? DONE_GREEN : colorValue(t.color))
 
 /** Sum of time budgets plus the number of to-dos without one (events are not counted as missing). */

@@ -5,7 +5,7 @@ import { db, type Activity, type Todo } from '../db'
 import { WEEKDAYS, addMonths, fmtDuration, fmtLong, fmtMonthYear, fmtWeekday, monthDayKeys, monthGrid, shiftKey, todayKey } from '../lib/date'
 import { activeSubstances, logKey } from '../lib/stats'
 import { useDaySheetConfig } from '../lib/settings'
-import { KIND_MARK, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
+import { KIND_MARK, doneMark, coversDay, doneStyle, timeOnDay, todoColor } from '../lib/todo'
 import { Sheet, TopBar, useSwipe } from '../components/ui'
 import { IconCalendar, IconChevronLeft, IconChevronRight, IconPlus, SubstanceGlyph } from '../components/Icons'
 import { moodLabel } from '../forms/JournalForms'
@@ -71,7 +71,7 @@ export function CalendarMonth() {
                   const done = doneStyle(t)
                   return (
                     <span key={t.id} className={`appt ${done.className}`} style={{ color: todoColor(t), ...done.style }}>
-                      {KIND_MARK[t.kind]}{t.title}
+                      {KIND_MARK[t.kind]}{t.title}{doneMark(t)}
                     </span>
                   )
                 })}
